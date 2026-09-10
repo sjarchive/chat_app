@@ -3,7 +3,6 @@ const authScreen = document.getElementById("auth-screen");
 const chatScreen = document.getElementById("chat-screen");
 const authForm = document.getElementById("auth-form");
 const authName = document.getElementById("auth-name");
-const authEmail = document.getElementById("auth-email");
 const authPassword = document.getElementById("auth-password");
 const authSubmit = document.getElementById("auth-submit");
 const authToggle = document.getElementById("auth-toggle");
@@ -23,7 +22,6 @@ let profileCache = {}; // id -> {display_name}
 // ---------- Auth mode toggle ----------
 authToggle.addEventListener("click", () => {
   isSignUpMode = !isSignUpMode;
-  authName.classList.toggle("hidden-field", !isSignUpMode);
   authSubmit.textContent = isSignUpMode ? "Sign up" : "Sign in";
   authToggle.textContent = isSignUpMode
     ? "Already have an account? Sign in"
@@ -31,33 +29,43 @@ authToggle.addEventListener("click", () => {
   authError.textContent = "";
 });
 
+// Supabase's auth system needs an email-shaped string, but the user only
+// ever sees and types a username. We turn it into a fake internal address
+// behind the scenes so no real email is ever sent.
+function usernameToFakeEmail(username) {
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  return `${clean}@users.circle-app.local`;
+}
+
 // ---------- Auth submit ----------
 authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   authError.textContent = "";
   authSubmit.disabled = true;
 
-  const email = authEmail.value.trim();
+  const username = authName.value.trim();
   const password = authPassword.value;
+  const fakeEmail = usernameToFakeEmail(username);
 
   try {
     if (isSignUpMode) {
-      const displayName = authName.value.trim() || email.split("@")[0];
       const { error } = await supabaseClient.auth.signUp({
-        email,
+        email: fakeEmail,
         password,
-        options: { data: { display_name: displayName } },
+        options: { data: { display_name: username } },
       });
       if (error) throw error;
-      authError.style.color = "#6B7480";
-      authError.textContent = "Check your email to confirm, then sign in.";
+      // No email confirmation needed since there's no real inbox —
+      // as long as "Confirm email" is off in Supabase, this logs in right away.
     } else {
-      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      const { error } = await supabaseClient.auth.signInWithPassword({ email: fakeEmail, password });
       if (error) throw error;
     }
   } catch (err) {
     authError.style.color = "#C4574B";
-    authError.textContent = err.message;
+    authError.textContent = err.message.includes("already registered")
+      ? "That username is taken."
+      : err.message;
   } finally {
     authSubmit.disabled = false;
   }
