@@ -40,6 +40,7 @@ let unseenWhileScrolledUp = 0;
 let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
 let pendingRestoreMessageId = null;
+let pendingRestoreScrollTop = null;
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -269,8 +270,9 @@ async function loadMessages() {
 
   // Normally open the chat at the newest message. If the user just opened a
   // file from an older message, restore that exact message instead.
-  const returnMessageId = getReturnMessageId();
-  pendingRestoreMessageId = returnMessageId;
+  const returnState = getReturnState();
+  pendingRestoreMessageId = returnState.id;
+  pendingRestoreScrollTop = returnState.scrollTop;
   if (!restoreReturnMessagePosition()) {
     scrollToBottom();
   }
@@ -291,25 +293,52 @@ function scrollToMessage(id, behavior = "smooth") {
   return true;
 }
 
-function getReturnMessageId() {
+function getReturnState() {
   try {
-    return sessionStorage.getItem("circle-return-message-id");
+    const id = sessionStorage.getItem("circle-return-message-id");
+    const top = sessionStorage.getItem("circle-return-scroll-top");
+    return {
+      id: id || null,
+      scrollTop: top === null ? null : Number(top),
+    };
   } catch (e) {
-    return null;
+    return { id: null, scrollTop: null };
   }
 }
 
-function restoreReturnMessagePosition() {
-  const id = pendingRestoreMessageId || getReturnMessageId();
-  if (!id) return false;
-  if (!messageRowById[id]) return false;
-
-  pendingRestoreMessageId = null;
+function clearReturnState() {
   try {
     sessionStorage.removeItem("circle-return-message-id");
+    sessionStorage.removeItem("circle-return-scroll-top");
   } catch (e) {}
+}
 
-  return scrollToMessage(id, "auto");
+function restoreReturnMessagePosition() {
+  const state = getReturnState();
+  const id = pendingRestoreMessageId || state.id;
+  const savedTop = pendingRestoreScrollTop ?? state.scrollTop;
+  if (!id || !messageRowById[id]) return false;
+
+  // Restore the exact scroll position first. This keeps the clicked file
+  // message in roughly the same place even if the browser changed the
+  // scroll position while switching tabs.
+  if (Number.isFinite(savedTop)) {
+    messageList.scrollTop = Math.max(0, Math.min(savedTop, messageList.scrollHeight));
+  }
+
+  const row = messageRowById[id];
+  const rect = row.getBoundingClientRect();
+  const listRect = messageList.getBoundingClientRect();
+  const isVisible = rect.bottom > listRect.top && rect.top < listRect.bottom;
+
+  // If the exact position is no longer valid after layout changes, center
+  // the original message rather than jumping to the latest message.
+  if (!isVisible) scrollToMessage(id, "auto");
+
+  pendingRestoreMessageId = null;
+  pendingRestoreScrollTop = null;
+  clearReturnState();
+  return true;
 }
 
 // ---------- Realtime subscription ----------
@@ -496,6 +525,7 @@ function renderMessage(msg) {
       // jumping to the newest message.
       try {
         sessionStorage.setItem("circle-return-message-id", String(msg.id));
+        sessionStorage.setItem("circle-return-scroll-top", String(messageList.scrollTop));
       } catch (e) {}
       window.open(mediaUrl, "_blank", "noopener,noreferrer");
     });
@@ -694,27 +724,26 @@ jumpBottom.addEventListener("click", () => {
 
 // Returning from an opened file should preserve the same message position,
 // including on browsers that restore the page without a full reload.
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
-  const id = getReturnMessageId();
-  if (!id) return;
-  pendingRestoreMessageId = id;
-  requestAnimationFrame(() => {
-    if (!restoreReturnMessagePosition()) {
-      // The message list may still be rebuilding; try once more after layout.
-      setTimeout(restoreReturnMessagePosition, 100);
-    }
-  });
-});
+function scheduleReturnRestore() {
+  const state = getReturnState();
+  if (!state.id) return;
+  pendingRestoreMessageId = state.id;
+  pendingRestoreScrollTop = state.scrollTop;
 
-window.addEventListener("pageshow", () => {
-  const id = getReturnMessageId();
-  if (!id) return;
-  pendingRestoreMessageId = id;
   requestAnimationFrame(() => {
     restoreReturnMessagePosition();
+    // Media/layout can change the scroll height a moment later, so restore
+    // again after the browser has completed the next layout pass.
+    setTimeout(restoreReturnMessagePosition, 120);
+    setTimeout(restoreReturnMessagePosition, 400);
   });
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") scheduleReturnRestore();
 });
+
+window.addEventListener("pageshow", scheduleReturnRestore);
 
 // ---------- Sending ----------
 composer.addEventListener("submit", async (e) => {
