@@ -139,7 +139,7 @@ html, body {
 .msg-row.theirs { justify-content: flex-start; }
 
 .bubble {
-  max-width: 74%;
+  max-width: min(74%, 420px);
   padding: 8px 12px;
   border-radius: 14px;
   font-size: 15px;
