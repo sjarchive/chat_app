@@ -438,14 +438,10 @@ function renderMessage(msg) {
   replyBtn.textContent = "↩";
   replyBtn.addEventListener("click", () => startReply(msg));
 
-  // Keep the reply icon on the outside edge, same side as the bubble
-  if (mine) {
-    row.appendChild(replyBtn);
-    row.appendChild(bubble);
-  } else {
-    row.appendChild(bubble);
-    row.appendChild(replyBtn);
-  }
+  // Icon always follows the bubble so a left-swipe drags the bubble away
+  // from it, not over it — avoids overlap on both mine and theirs rows.
+  row.appendChild(bubble);
+  row.appendChild(replyBtn);
   messageList.appendChild(row);
   attachSwipeToReply(row, bubble, replyBtn, msg);
 
