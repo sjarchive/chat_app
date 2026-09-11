@@ -39,6 +39,7 @@ let lastRowElement = null;
 let unseenWhileScrolledUp = 0;
 let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
+let pendingRestoreMessageId = null;
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -265,7 +266,14 @@ async function loadMessages() {
   lastRowElement = null;
   messageRowById = {}; // old rows are gone, forget where they were
   data.forEach(renderMessage);
-  scrollToBottom();
+
+  // Normally open the chat at the newest message. If the user just opened a
+  // file from an older message, restore that exact message instead.
+  const returnMessageId = getReturnMessageId();
+  pendingRestoreMessageId = returnMessageId;
+  if (!restoreReturnMessagePosition()) {
+    scrollToBottom();
+  }
 }
 
 function truncate(str, n) {
@@ -274,12 +282,34 @@ function truncate(str, n) {
 
 // Scrolls to and briefly highlights a message that's already on screen
 // (used when tapping a quoted reply).
-function scrollToMessage(id) {
+function scrollToMessage(id, behavior = "smooth") {
   const row = messageRowById[id];
-  if (!row) return;
-  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (!row) return false;
+  row.scrollIntoView({ behavior, block: "center" });
   row.classList.add("highlight-flash");
   setTimeout(() => row.classList.remove("highlight-flash"), 1200);
+  return true;
+}
+
+function getReturnMessageId() {
+  try {
+    return sessionStorage.getItem("circle-return-message-id");
+  } catch (e) {
+    return null;
+  }
+}
+
+function restoreReturnMessagePosition() {
+  const id = pendingRestoreMessageId || getReturnMessageId();
+  if (!id) return false;
+  if (!messageRowById[id]) return false;
+
+  pendingRestoreMessageId = null;
+  try {
+    sessionStorage.removeItem("circle-return-message-id");
+  } catch (e) {}
+
+  return scrollToMessage(id, "auto");
 }
 
 // ---------- Realtime subscription ----------
@@ -460,7 +490,15 @@ function renderMessage(msg) {
     const img = document.createElement("img");
     img.className = "media";
     img.src = mediaUrl;
-    img.addEventListener("click", () => window.open(mediaUrl, "_blank", "noopener,noreferrer"));
+    img.addEventListener("click", () => {
+      // Remember exactly which message opened the external file. When the user
+      // returns to this chat, restore the viewport to this message instead of
+      // jumping to the newest message.
+      try {
+        sessionStorage.setItem("circle-return-message-id", String(msg.id));
+      } catch (e) {}
+      window.open(mediaUrl, "_blank", "noopener,noreferrer");
+    });
     bubble.appendChild(img);
   }
 
@@ -651,6 +689,31 @@ jumpBottom.addEventListener("click", () => {
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   unseenWhileScrolledUp = 0;
   updateJumpBottom();
+});
+
+
+// Returning from an opened file should preserve the same message position,
+// including on browsers that restore the page without a full reload.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  const id = getReturnMessageId();
+  if (!id) return;
+  pendingRestoreMessageId = id;
+  requestAnimationFrame(() => {
+    if (!restoreReturnMessagePosition()) {
+      // The message list may still be rebuilding; try once more after layout.
+      setTimeout(restoreReturnMessagePosition, 100);
+    }
+  });
+});
+
+window.addEventListener("pageshow", () => {
+  const id = getReturnMessageId();
+  if (!id) return;
+  pendingRestoreMessageId = id;
+  requestAnimationFrame(() => {
+    restoreReturnMessagePosition();
+  });
 });
 
 // ---------- Sending ----------
