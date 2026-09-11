@@ -215,16 +215,34 @@ signOutBtn.addEventListener("click", async () => {
 // Without this, the push_subscriptions row (and the browser's own subscription)
 // stays active forever, so the server keeps sending notifications even though
 // nobody's logged in on this device anymore.
+//
+// Must run BEFORE auth.signOut(): deleting the rows needs the still-valid
+// session for the table's row-level security to allow it.
 async function unsubscribeFromPush() {
-  if (!("serviceWorker" in navigator)) return;
+  const userId = currentUser?.id;
   try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (!registration) return;
-    const subscription = await registration.pushManager.getSubscription();
-    if (!subscription) return;
-    const endpoint = subscription.endpoint;
-    await subscription.unsubscribe();
-    await supabaseClient.from("push_subscriptions").delete().eq("endpoint", endpoint);
+    // Cancel the browser-side subscription when we can find it. This alone
+    // isn't relied on: it can come back null (permission revoked, or the
+    // service worker hasn't finished registering right after a reload), and
+    // any endpoint it misses would keep receiving pushes.
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = registration
+        ? await registration.pushManager.getSubscription()
+        : null;
+      if (subscription) await subscription.unsubscribe();
+    }
+
+    // Delete every subscription row for this user, not just this device's
+    // endpoint — stale rows from earlier logins would otherwise keep the
+    // notifications coming. This is what actually stops the server sending.
+    if (userId) {
+      const { error } = await supabaseClient
+        .from("push_subscriptions")
+        .delete()
+        .eq("user_id", userId);
+      if (error) console.error(error);
+    }
   } catch (err) {
     console.error(err);
   }
