@@ -85,7 +85,7 @@ function usernameToFakeEmail(username) {
 }
 
 function validateName(name) {
-  if (!name) return "Name is required.";
+  if (!name.trim()) return "Name is required.";
   if (name.length > 20) return "Name must be 20 characters or fewer.";
   return null;
 }
@@ -117,7 +117,7 @@ authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   authError.textContent = "";
 
-  const fullName = authFullname.value.trim();
+  const fullName = authFullname.value;
   const username = authName.value.trim();
   const password = authPassword.value;
 
