@@ -22,7 +22,7 @@ html, body {
 .hidden { display: none !important; }
 .hidden-field { display: none; }
 
-.screen { height: 100dvh; display: flex; flex-direction: column; position: relative; }
+.screen { height: 100dvh; height: calc(var(--app-height, 100dvh)); display: flex; flex-direction: column; position: relative; }
 
 /* ---------- Auth ---------- */
 #auth-screen { align-items: center; justify-content: center; padding: 24px; }
@@ -192,6 +192,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
   background: var(--surface);
   border-top: 1px solid #232A34;
   flex-shrink: 0;
