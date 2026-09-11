@@ -75,6 +75,24 @@
     </form>
   </div>
 
+  <script>
+    // If a Supabase session is already persisted in localStorage, show the chat
+    // screen immediately instead of the auth screen, so there's no flash of the
+    // sign-in page on refresh while real session validation happens below.
+    // (Mirrors the theme flash-prevention script at the top of <head>.)
+    (function () {
+      try {
+        var hasSession = Object.keys(localStorage).some(function (key) {
+          return key.indexOf("sb-") === 0 && key.indexOf("-auth-token") !== -1 && localStorage.getItem(key);
+        });
+        if (hasSession) {
+          document.getElementById("auth-screen").classList.add("hidden");
+          document.getElementById("chat-screen").classList.remove("hidden");
+        }
+      } catch (e) {}
+    })();
+  </script>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="/supabase-config.js"></script>
   <script src="/script.js"></script>
