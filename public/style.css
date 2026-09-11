@@ -227,6 +227,20 @@ html, body {
   .reply-trigger { font-size: 26px; }
 }
 
+/* Desktop click feedback: bubble + icon nudge left together, then settle
+   back, so clicking the reply icon reads as a deliberate little "punch"
+   rather than an instant no-op. Transform-based (not the flex reflow used
+   at rest) so it applies the same way to mine and theirs rows. */
+@keyframes reply-bounce {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(-8px); }
+  100% { transform: translateX(0); }
+}
+.msg-row.reply-bounce .bubble,
+.msg-row.reply-bounce .reply-trigger {
+  animation: reply-bounce 0.22s ease;
+}
+
 /* Let JS own horizontal swipe gestures while still allowing normal vertical scroll. */
 .bubble { touch-action: pan-y; }
 
