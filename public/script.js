@@ -2,6 +2,7 @@
 const authScreen = document.getElementById("auth-screen");
 const chatScreen = document.getElementById("chat-screen");
 const authForm = document.getElementById("auth-form");
+const authFullname = document.getElementById("auth-fullname");
 const authName = document.getElementById("auth-name");
 const authPassword = document.getElementById("auth-password");
 const authSubmit = document.getElementById("auth-submit");
@@ -67,6 +68,12 @@ authToggle.addEventListener("click", () => {
     ? "Already have an account? Sign in"
     : "Need an account? Sign up";
   authError.textContent = "";
+
+  // Name is only collected (and required) when signing up — the login
+  // dialog only ever asks for username + password.
+  authFullname.classList.toggle("hidden", !isSignUpMode);
+  authFullname.required = isSignUpMode;
+  if (!isSignUpMode) authFullname.value = "";
 });
 
 // Supabase's auth system needs an email-shaped string, but the user only
@@ -75,6 +82,12 @@ authToggle.addEventListener("click", () => {
 function usernameToFakeEmail(username) {
   const clean = username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
   return `${clean}@users.circle-app.local`;
+}
+
+function validateName(name) {
+  if (!name) return "Name is required.";
+  if (name.length > 50) return "Name must be 50 characters or fewer.";
+  return null;
 }
 
 // Same rules as the notes website
@@ -101,10 +114,17 @@ authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   authError.textContent = "";
 
+  const fullName = authFullname.value.trim();
   const username = authName.value.trim();
   const password = authPassword.value;
 
   if (isSignUpMode) {
+    const nameError = validateName(fullName);
+    if (nameError) {
+      authError.style.color = "#C4574B";
+      authError.textContent = nameError;
+      return;
+    }
     const usernameError = validateUsername(username);
     if (usernameError) {
       authError.style.color = "#C4574B";
@@ -127,7 +147,9 @@ authForm.addEventListener("submit", async (e) => {
       const { error } = await supabaseClient.auth.signUp({
         email: fakeEmail,
         password,
-        options: { data: { display_name: username } },
+        // display_name drives what shows on message bubbles / typing indicator —
+        // that should be the person's name, not their (login-only) username.
+        options: { data: { display_name: fullName } },
       });
       if (error) throw error;
       // No email confirmation needed since there's no real inbox —
