@@ -198,21 +198,21 @@ html, body {
   line-height: 1;
   cursor: pointer;
   box-sizing: border-box;
-  padding: 6px;
+  padding: 0; /* padding only appears when revealed — border-box can't shrink below its own padding, so a fixed padding here would keep reserving space even at width:0 */
   width: 0; /* collapsed at rest — reserves no space, so bubbles stay flush to the edge */
   min-width: 0; /* flex items default to min-width:auto, which ignores width:0 when there's content */
   overflow: hidden;
   opacity: 0; /* revealed by hover (desktop) or swipe (mobile, via JS) */
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent; /* no blue flash on tap/long-press */
-  transition: width 0.18s ease, opacity 0.15s ease;
+  transition: width 0.18s ease, padding 0.18s ease, opacity 0.15s ease;
 }
 .reply-trigger:focus { outline: none; }
 .reply-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Desktop / mouse: reveal on hover over the row — the bubble reflows to make room */
 @media (hover: hover) and (pointer: fine) {
-  .msg-row:hover .reply-trigger { width: 34px; opacity: 0.55; }
+  .msg-row:hover .reply-trigger { width: 34px; padding: 6px; opacity: 0.55; }
   .reply-trigger:hover { opacity: 1; }
 }
 
