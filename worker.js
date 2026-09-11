@@ -24,7 +24,7 @@ async function handleNotify(request, env) {
   const payload = await request.json();
   const message = payload.record; // the newly inserted row, from Supabase's webhook
 
-  if (!message || !message.sender_id) {
+  if (!message || !message.sender_id || !message.recipient_id) {
     return new Response("Bad request", { status: 400 });
   }
 
@@ -42,9 +42,9 @@ async function handleNotify(request, env) {
   const senderRows = await senderRes.json();
   const senderName = senderRows[0]?.display_name || "Someone";
 
-  // Get every push subscription except the sender's own devices
+  // Direct messages: only the recipient's devices get a push
   const subsRes = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/push_subscriptions?user_id=neq.${message.sender_id}`,
+    `${env.SUPABASE_URL}/rest/v1/push_subscriptions?user_id=eq.${message.recipient_id}`,
     { headers }
   );
   const subscriptions = await subsRes.json();
