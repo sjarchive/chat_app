@@ -80,13 +80,13 @@ authToggle.addEventListener("click", () => {
 // ever sees and types a username. We turn it into a fake internal address
 // behind the scenes so no real email is ever sent.
 function usernameToFakeEmail(username) {
-  const clean = username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  const clean = username.trim();
   return `${clean}@users.circle-app.local`;
 }
 
 function validateName(name) {
   if (!name) return "Name is required.";
-  if (name.length > 50) return "Name must be 50 characters or fewer.";
+  if (name.length > 20) return "Name must be 20 characters or fewer.";
   return null;
 }
 
@@ -94,6 +94,9 @@ function validateName(name) {
 function validateUsername(username) {
   if (username.length < 5 || username.length > 10) {
     return "Username must be 5–10 characters.";
+  }
+  if (!/^[a-z0-9_.]+$/.test(username)) {
+    return "Username can contain only lowercase letters, numbers, underscores, and dots.";
   }
   return null;
 }
