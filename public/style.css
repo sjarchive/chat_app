@@ -194,12 +194,14 @@ html, body {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 15px;
+  font-size: 22px;
   line-height: 1;
   cursor: pointer;
-  padding: 4px;
+  padding: 6px;
   opacity: 0; /* hidden until revealed by hover (desktop) or swipe (mobile, via JS) */
   flex-shrink: 0;
+  position: relative;
+  z-index: 2; /* stay above the bubble even when it slides over during a swipe */
   transition: opacity 0.15s ease;
 }
 
@@ -209,8 +211,10 @@ html, body {
   .reply-trigger:hover { opacity: 1; }
 }
 
-/* Let JS own horizontal drag on the bubble while still allowing normal vertical scroll */
-.bubble { touch-action: pan-y; }
+/* Let JS own horizontal drag on the bubble while still allowing normal vertical scroll.
+   position+z-index keeps it below the reply icon so a leftward drag on "mine" rows
+   (where the icon sits before the bubble in the DOM) doesn't paint over the icon. */
+.bubble { touch-action: pan-y; position: relative; z-index: 1; }
 
 .quoted-msg {
   display: flex;
