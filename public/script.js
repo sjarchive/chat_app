@@ -447,10 +447,76 @@ function renderMessage(msg) {
     row.appendChild(replyBtn);
   }
   messageList.appendChild(row);
+  attachSwipeToReply(row, bubble, replyBtn, msg);
 
   lastRenderedSenderId = msg.sender_id;
   lastRowElement = row;
   messageRowById[msg.id] = row;
+}
+
+// ---------- Swipe-to-reply (mobile) ----------
+// Left-swiping a message bubble drags it and fades in the reply icon;
+// releasing past the threshold triggers the reply. On desktop the icon
+// is revealed on hover instead (see .msg-row:hover in style.css).
+function attachSwipeToReply(row, bubble, replyBtn, msg) {
+  const THRESHOLD = 56; // px of drag needed to trigger reply on release
+  const MAX_DRAG = 80; // px cap so the bubble doesn't fly off-screen
+  const SLOP = 8; // px of movement before we decide horizontal vs vertical
+
+  let startX = 0;
+  let startY = 0;
+  let dragging = false; // touch is active on this row
+  let swiping = false; // we've committed to a horizontal swipe
+  let deltaX = 0;
+
+  row.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    dragging = true;
+    swiping = false;
+    deltaX = 0;
+    bubble.style.transition = "none";
+    replyBtn.style.transition = "none";
+  }, { passive: true });
+
+  row.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+
+    if (!swiping) {
+      if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
+      if (Math.abs(dy) > Math.abs(dx)) {
+        // Vertical scroll — let the page handle it, not us.
+        dragging = false;
+        return;
+      }
+      swiping = true;
+    }
+
+    deltaX = dx < 0 ? Math.max(dx, -MAX_DRAG) : 0; // only left swipes reveal the icon
+    bubble.style.transform = `translateX(${deltaX}px)`;
+    replyBtn.style.opacity = Math.min(1, Math.abs(deltaX) / THRESHOLD).toFixed(2);
+    e.preventDefault();
+  }, { passive: false });
+
+  function endSwipe() {
+    if (!dragging) return;
+    dragging = false;
+    bubble.style.transition = "transform 0.18s ease";
+    replyBtn.style.transition = "opacity 0.18s ease";
+    bubble.style.transform = "translateX(0)";
+    replyBtn.style.opacity = "0";
+    if (swiping && Math.abs(deltaX) >= THRESHOLD) {
+      startReply(msg);
+    }
+    swiping = false;
+  }
+
+  row.addEventListener("touchend", endSwipe);
+  row.addEventListener("touchcancel", endSwipe);
 }
 
 // ---------- Reply-to ----------
