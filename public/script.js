@@ -5,6 +5,8 @@ const authForm = document.getElementById("auth-form");
 const authFullname = document.getElementById("auth-fullname");
 const authName = document.getElementById("auth-name");
 const authPassword = document.getElementById("auth-password");
+const passwordToggle = document.getElementById("password-toggle");
+const passwordToggleIcon = document.getElementById("password-toggle-icon");
 const authSubmit = document.getElementById("auth-submit");
 const authToggle = document.getElementById("auth-toggle");
 const authError = document.getElementById("auth-error");
@@ -61,19 +63,44 @@ themeToggle.addEventListener("click", () => {
 });
 
 // ---------- Auth mode toggle ----------
+function resetAuthFields() {
+  authFullname.value = "";
+  authName.value = "";
+  authPassword.value = "";
+  authError.textContent = "";
+  authPassword.type = "password";
+  passwordToggle.setAttribute("aria-label", "Show password");
+  passwordToggle.setAttribute("aria-pressed", "false");
+  passwordToggleIcon.innerHTML = `
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  `;
+}
+
 authToggle.addEventListener("click", () => {
   isSignUpMode = !isSignUpMode;
   authSubmit.textContent = isSignUpMode ? "Sign up" : "Sign in";
   authToggle.textContent = isSignUpMode
     ? "Already have an account? Sign in"
     : "Need an account? Sign up";
-  authError.textContent = "";
+
+  // Switching auth modes always starts with a completely fresh form.
+  resetAuthFields();
 
   // Name is only collected (and required) when signing up — the login
   // dialog only ever asks for username + password.
   authFullname.classList.toggle("hidden", !isSignUpMode);
   authFullname.required = isSignUpMode;
-  if (!isSignUpMode) authFullname.value = "";
+});
+
+passwordToggle.addEventListener("click", () => {
+  const showing = authPassword.type === "text";
+  authPassword.type = showing ? "password" : "text";
+  passwordToggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+  passwordToggle.setAttribute("aria-pressed", String(!showing));
+  passwordToggleIcon.innerHTML = showing
+    ? `<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle>`
+    : `<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path>`;
 });
 
 // Supabase's auth system needs an email-shaped string, but the user only

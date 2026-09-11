@@ -16,6 +16,18 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#0E1116" />
 <link rel="stylesheet" href="/style.css" />
+<style>
+  .password-field { position: relative; width: 100%; }
+  .password-field #auth-password { padding-right: 48px; width: 100%; box-sizing: border-box; }
+  .password-toggle {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    width: 36px; height: 36px; padding: 0; border: 0; background: transparent;
+    color: inherit; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0.75;
+  }
+  .password-toggle:hover, .password-toggle:focus-visible { opacity: 1; }
+  .password-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+</style>
 </head>
 <body>
 
@@ -28,7 +40,15 @@
       <form id="auth-form">
         <input id="auth-fullname" class="hidden" type="text" placeholder="Name" autocomplete="name" maxlength="20" />
         <input id="auth-name" type="text" placeholder="Username" autocomplete="username" minlength="5" maxlength="10" required />
-        <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" minlength="8" maxlength="20" required />
+        <div class="password-field">
+          <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" minlength="8" maxlength="20" required />
+          <button type="button" id="password-toggle" class="password-toggle" aria-label="Show password" aria-pressed="false">
+            <svg id="password-toggle-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+        </div>
         <button type="submit" id="auth-submit">Sign in</button>
       </form>
 
