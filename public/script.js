@@ -17,6 +17,8 @@ const memberCount = document.getElementById("member-count");
 const jumpBottom = document.getElementById("jump-bottom");
 const jumpBottomCount = document.getElementById("jump-bottom-count");
 const typingIndicator = document.getElementById("typing-indicator");
+const themeToggle = document.getElementById("theme-toggle");
+const themeIcon = document.getElementById("theme-icon");
 
 let isSignUpMode = false;
 let currentUser = null;
@@ -27,6 +29,28 @@ let lastRowElement = null;
 let unseenWhileScrolledUp = 0;
 let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
+
+// ---------- Theme toggle ----------
+const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
+const MOON_ICON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  themeIcon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
+  themeToggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "light" ? "#ECE5DD" : "#0E1116");
+  try {
+    localStorage.setItem("circle-theme", theme);
+  } catch (e) {}
+}
+
+applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  applyTheme(current === "light" ? "dark" : "light");
+});
 
 // ---------- Auth mode toggle ----------
 authToggle.addEventListener("click", () => {
@@ -448,8 +472,17 @@ async function subscribeToPush(registration, userId) {
 
 // ---------- Keep layout height accurate when the mobile keyboard opens/closes ----------
 function setAppHeight() {
-  const height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const vv = window.visualViewport;
+  const height = vv ? vv.height : window.innerHeight;
   document.documentElement.style.setProperty("--app-height", `${height}px`);
+
+  // Safety net for browsers that scroll instead of resizing (e.g. iOS Safari):
+  // pin the whole screen to the visual viewport's offset so nothing drifts.
+  const screen = document.querySelector(".screen:not(.hidden)");
+  if (screen && vv) {
+    screen.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  }
+
   // Keep the composer in view when the keyboard is open
   if (document.activeElement === messageInput) {
     scrollToBottom();
@@ -458,6 +491,7 @@ function setAppHeight() {
 setAppHeight();
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", setAppHeight);
+  window.visualViewport.addEventListener("scroll", setAppHeight);
 } else {
   window.addEventListener("resize", setAppHeight);
 }
