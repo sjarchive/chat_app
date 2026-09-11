@@ -1449,11 +1449,15 @@ function setAppHeight() {
   document.documentElement.style.setProperty("--app-height", `${height}px`);
 
   // Safety net for browsers that scroll instead of resizing (e.g. iOS Safari):
-  // pin the whole screen to the visual viewport's offset so nothing drifts.
-  const screen = document.querySelector(".screen:not(.hidden)");
-  if (screen && vv) {
-    screen.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
-  }
+  // pin every screen to the visual viewport's offset via a shared CSS var,
+  // rather than looking up "the visible one" — right after a refresh, the
+  // has-session flash-prevention CSS can show a screen visually before its
+  // "hidden" class has actually been removed, so a querySelector(".screen
+  // :not(.hidden)") lookup here would grab the wrong element (or none).
+  document.documentElement.style.setProperty(
+    "--app-offset-top",
+    vv && vv.offsetTop ? `${vv.offsetTop}px` : "0px"
+  );
 
   // Keep the composer in view when the keyboard is open
   if (document.activeElement === messageInput) {

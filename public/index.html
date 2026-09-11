@@ -92,7 +92,7 @@ html, body {
 .hidden { display: none !important; }
 .hidden-field { display: none; }
 
-.screen { height: 100dvh; height: calc(var(--app-height, 100dvh)); display: flex; flex-direction: column; position: relative; }
+.screen { height: 100dvh; height: calc(var(--app-height, 100dvh)); display: flex; flex-direction: column; position: relative; transform: translateY(var(--app-offset-top, 0px)); }
 
 /* ---------- Auth ---------- */
 #auth-screen { align-items: center; justify-content: center; padding: 24px; }
