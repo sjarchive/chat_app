@@ -225,6 +225,7 @@ html, body {
 [data-theme="light"] .mine .bubble .meta { color: rgba(17,27,33,0.55); }
 
 .bubble .meta .tick { font-size: 11px; }
+.bubble .meta .tick.seen { color: #53BDEB; letter-spacing: -2px; }
 
 .bubble img.media {
   max-width: 100%;
@@ -364,11 +365,113 @@ html, body {
 }
 
 .typing-indicator {
-  padding: 2px 16px 6px;
   font-size: 12px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* ---------- Chats list ---------- */
+.chat-header .chat-header-info { min-width: 0; }
+#back-button { margin-right: 4px; }
+
+.search-bar {
+  position: relative;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+#user-search {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 10px 16px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+#user-search:focus { border-color: var(--accent); }
+
+.search-results {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% - 6px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  z-index: 20;
+  overflow: hidden;
+}
+.search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.search-result:hover, .search-result:active { background: var(--surface-2); }
+.search-result-name { font-size: 15px; }
+.search-result-username { font-size: 12px; color: var(--text-dim); }
+.search-empty { padding: 10px 14px; font-size: 13px; color: var(--text-dim); }
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.chat-item:hover, .chat-item:active { background: var(--surface); }
+.chat-item-info { flex: 1; min-width: 0; }
+.chat-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.chat-item-name { font-size: 15px; font-weight: 600; }
+.chat-item-time { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+.chat-item-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.chat-item-preview {
+  font-size: 13px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-item-badge {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 11px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-list-empty {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
 }
 
 .jump-bottom {
@@ -505,10 +608,10 @@ html, body {
 
   /* Paired with the has-session class set in the head script above: applies
      as soon as these elements are inserted, before script.js finishes its
-     real auth check, so refreshing while logged in never shows a flash of
-     the auth screen. !important matches .hidden's own specificity. */
+     real auth check, so refreshing while logged in never shows a flash of the
+     auth screen. !important matches .hidden's own specificity. */
   html.has-session #auth-screen { display: none !important; }
-  html.has-session #chat-screen.hidden { display: flex !important; }
+  html.has-session #chats-screen.hidden { display: flex !important; }
 </style>
 </head>
 <body>
@@ -539,12 +642,11 @@ html, body {
     </div>
   </div>
 
-  <!-- CHAT SCREEN -->
-  <div id="chat-screen" class="screen hidden">
+  <!-- CHATS LIST SCREEN -->
+  <div id="chats-screen" class="screen hidden">
     <header class="chat-header">
       <div class="chat-header-info">
-        <span class="chat-title">Circle</span>
-        <span class="chat-sub" id="member-count">—</span>
+        <span class="chat-title">Chats</span>
       </div>
       <div class="header-actions">
         <button type="button" id="settings-button" class="icon-button" aria-label="Settings">
@@ -559,11 +661,37 @@ html, body {
       </div>
     </header>
 
+    <div class="search-bar">
+      <input id="user-search" type="search" placeholder="Search username…" autocomplete="off" aria-label="Search users by username" />
+      <div id="search-results" class="search-results hidden"></div>
+    </div>
+
+    <main id="chat-list" class="chat-list"></main>
+  </div>
+
+  <!-- CHAT SCREEN -->
+  <div id="chat-screen" class="screen hidden">
+    <header class="chat-header">
+      <button type="button" id="back-button" class="icon-button" aria-label="Back to chats">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="chat-header-info">
+        <span class="chat-title" id="chat-partner-name">…</span>
+        <span class="chat-sub hidden" id="typing-indicator"></span>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="settings-button-chat" class="icon-button" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        </button>
+        <button type="button" id="theme-toggle-chat" class="icon-button" aria-label="Toggle theme">
+          <svg id="theme-icon-chat" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
+      </div>
+    </header>
+
     <main id="message-list" class="message-list"></main>
 
     <div id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></div>
-
-    <div id="typing-indicator" class="typing-indicator hidden"></div>
 
     <div id="reply-preview" class="reply-preview hidden">
       <div class="reply-preview-info">
@@ -582,8 +710,11 @@ html, body {
       <button type="submit" id="send-button" class="send-button" aria-label="Send">➤</button>
     </form>
 
-    <!-- SETTINGS MODAL -->
-    <div id="settings-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  </div>
+
+  <!-- SETTINGS MODAL (top-level: openable from both the chats list and a
+       conversation, neither of which is an ancestor of both screens) -->
+  <div id="settings-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="settings-card">
         <h2 id="settings-title">Settings</h2>
         <label class="settings-label" for="settings-name">Your name</label>

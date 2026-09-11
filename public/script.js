@@ -1,5 +1,6 @@
 // ---------- Elements ----------
 const authScreen = document.getElementById("auth-screen");
+const chatsScreen = document.getElementById("chats-screen");
 const chatScreen = document.getElementById("chat-screen");
 const authForm = document.getElementById("auth-form");
 const authFullname = document.getElementById("auth-fullname");
@@ -10,23 +11,30 @@ const passwordToggleIcon = document.getElementById("password-toggle-icon");
 const authSubmit = document.getElementById("auth-submit");
 const authToggle = document.getElementById("auth-toggle");
 const authError = document.getElementById("auth-error");
+const chatList = document.getElementById("chat-list");
+const userSearch = document.getElementById("user-search");
+const searchResults = document.getElementById("search-results");
+const backButton = document.getElementById("back-button");
+const chatPartnerName = document.getElementById("chat-partner-name");
 const messageList = document.getElementById("message-list");
 const composer = document.getElementById("composer");
 const messageInput = document.getElementById("message-input");
 const attachButton = document.getElementById("attach-button");
 const attachInput = document.getElementById("attach-input");
 const signOutBtn = document.getElementById("sign-out");
-const memberCount = document.getElementById("member-count");
 const jumpBottom = document.getElementById("jump-bottom");
 const jumpBottomCount = document.getElementById("jump-bottom-count");
 const typingIndicator = document.getElementById("typing-indicator");
-const themeToggle = document.getElementById("theme-toggle");
-const themeIcon = document.getElementById("theme-icon");
+const themeToggles = [document.getElementById("theme-toggle"), document.getElementById("theme-toggle-chat")];
+const themeIcons = [document.getElementById("theme-icon"), document.getElementById("theme-icon-chat")];
 const replyPreview = document.getElementById("reply-preview");
 const replyPreviewName = document.getElementById("reply-preview-name");
 const replyPreviewText = document.getElementById("reply-preview-text");
 const replyPreviewCancel = document.getElementById("reply-preview-cancel");
-const settingsButton = document.getElementById("settings-button");
+const settingsButtons = [
+  document.getElementById("settings-button"),
+  document.getElementById("settings-button-chat"),
+];
 const settingsOverlay = document.getElementById("settings-overlay");
 const settingsName = document.getElementById("settings-name");
 const settingsError = document.getElementById("settings-error");
@@ -36,7 +44,7 @@ const composerError = document.getElementById("composer-error");
 
 let isSignUpMode = false;
 let currentUser = null;
-let profileCache = {}; // id -> {display_name}
+let profileCache = {}; // id -> display_name (usernames are looked up ad-hoc for search)
 let messageCache = {}; // id -> full message row, so replies can show a quote
 let messageRowById = {}; // id -> rendered DOM row, so we can scroll to it
 let replyingTo = null; // the message object currently being replied to
@@ -48,6 +56,8 @@ let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
 let pendingRestoreMessageId = null;
 let pendingRestoreScrollTop = null;
+let currentPartner = null; // the other user in the open conversation
+let chatSummaries = {}; // partnerId -> { last: message row, unread: count }
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -55,8 +65,13 @@ const MOON_ICON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
 
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  themeIcon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
-  themeToggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+  themeIcons.forEach((icon) => {
+    if (icon) icon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
+  });
+  themeToggles.forEach((toggle) => {
+    if (!toggle) return;
+    toggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+  });
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme === "light" ? "#ECE5DD" : "#0E1116");
   try {
@@ -66,9 +81,13 @@ function applyTheme(theme) {
 
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 
-themeToggle.addEventListener("click", () => {
-  const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-  applyTheme(current === "light" ? "dark" : "light");
+themeToggles.forEach((toggle) => {
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+      applyTheme(current === "light" ? "dark" : "light");
+    });
+  }
 });
 
 // ---------- Auth mode toggle ----------
@@ -254,21 +273,23 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
     // Supabase re-fires this event (e.g. TOKEN_REFRESHED) whenever the tab
     // regains focus/visibility, not just on real sign-in. Without this guard,
-    // switching back to this tab after opening a media file re-ran enterChat()
-    // -> loadMessages(), which wiped and re-rendered the message list *after*
-    // the scroll-restore logic had already consumed and cleared its saved
-    // position, so you'd land back at the newest message instead. It also
-    // opened duplicate realtime/typing channels on every focus. Only run the
-    // full init when this is actually a different/new session.
+    // switching back to this tab after opening a media file re-ran the whole
+    // enter flow, which wiped and re-rendered lists *after* scroll-restore
+    // logic had already consumed its saved position, and opened duplicate
+    // realtime/typing channels on every focus. Only run the full init when
+    // this is actually a different/new session.
     if (currentUser?.id === session.user.id) return;
     currentUser = session.user;
-    enterChat();
+    enterApp();
   } else {
     currentUser = null;
+    currentPartner = null;
+    closeConversation();
     // Sign-out removed this user's push subscription rows, so allow
     // subscribeToPush to run again if they sign back in this session.
     pushSubscribedForUser = null;
     authScreen.classList.remove("hidden");
+    chatsScreen.classList.add("hidden");
     chatScreen.classList.add("hidden");
   }
 });
@@ -314,34 +335,259 @@ function subscribeProfiles() {
           activeTypers[id] = display_name;
           renderTypingIndicator();
         }
+
+        // ...and the conversation header / chats-list rows showing that name
+        if (currentPartner === id) chatPartnerName.textContent = display_name;
+        if (!chatsScreen.classList.contains("hidden")) renderChatList();
+        if (replyingTo && replyingTo.sender_id === id) {
+          replyPreviewName.textContent = display_name;
+        }
       }
     )
     .subscribe();
 }
 
-async function enterChat() {
+function enterApp() {
   authScreen.classList.add("hidden");
-  chatScreen.classList.remove("hidden");
-  await loadProfiles();
-  await loadMessages();
-  subscribeRealtime();
-  subscribeTyping();
-  subscribeProfiles();
+  chatScreen.classList.add("hidden");
+  chatsScreen.classList.remove("hidden");
+  currentPartner = null;
+  loadProfiles().then(() => {
+    loadChatSummaries();
+    subscribeRealtime();
+    subscribeProfiles();
+  });
 }
+
+// ---------- Conversation navigation ----------
+async function openConversation(partnerId) {
+  currentPartner = partnerId;
+  chatPartnerName.textContent = profileCache[partnerId] || "…";
+  if (!profileCache[partnerId]) {
+    const name = await ensureProfileCached(partnerId);
+    if (name) chatPartnerName.textContent = name;
+  }
+  // Opening the chat reads everything, so its unread badge is stale from
+  // here on (markConversationSeen persists this in the database).
+  if (chatSummaries[partnerId]) chatSummaries[partnerId].unread = 0;
+
+  chatsScreen.classList.add("hidden");
+  chatScreen.classList.remove("hidden");
+  cancelReply();
+  hideComposerError();
+  userSearch.value = "";
+  hideSearchResults();
+
+  await loadMessages();
+  subscribeTyping();
+  markConversationSeen();
+}
+
+function closeConversation() {
+  // Detach the typing broadcast for this conversation so signals from it
+  // stop arriving while browsing the chats list.
+  if (typingChannel) {
+    supabaseClient.removeChannel(typingChannel);
+    typingChannel = null;
+  }
+  Object.keys(activeTypers).forEach(clearTyping);
+  chatScreen.classList.add("hidden");
+  currentPartner = null;
+}
+
+backButton.addEventListener("click", async () => {
+  closeConversation();
+  chatsScreen.classList.remove("hidden");
+  await loadChatSummaries();
+});
 
 // ---------- Profiles ----------
 async function loadProfiles() {
   const { data, error } = await supabaseClient.from("profiles").select("id, display_name");
   if (error) return console.error(error);
   profileCache = Object.fromEntries(data.map((p) => [p.id, p.display_name]));
-  memberCount.textContent = `${data.length} member${data.length === 1 ? "" : "s"}`;
 }
 
-// ---------- Load message history ----------
+// ---------- Chats list ----------
+// Builds the conversation list from the most recent messages: group by
+// partner (whoever of sender/recipient isn't me), keep each partner's latest
+// message as the row preview, and count messages I received but haven't seen.
+async function loadChatSummaries() {
+  const { data, error } = await supabaseClient
+    .from("messages")
+    .select("id, sender_id, recipient_id, body, media_path, created_at, seen_at")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return console.error(error);
+
+  chatSummaries = {};
+  for (const msg of data) {
+    const partner = msg.sender_id === currentUser.id ? msg.recipient_id : msg.sender_id;
+    const s = (chatSummaries[partner] ||= { last: null, unread: 0 });
+    if (!s.last) s.last = msg;
+    if (msg.recipient_id === currentUser.id && !msg.seen_at) s.unread++;
+  }
+  renderChatList();
+}
+
+function previewText(msg) {
+  if (msg.media_path) return "📷 Photo";
+  return msg.body || "";
+}
+
+function timeLabel(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function renderChatList() {
+  chatList.innerHTML = "";
+  const partners = Object.keys(chatSummaries).sort(
+    (a, b) => new Date(chatSummaries[b].last.created_at) - new Date(chatSummaries[a].last.created_at)
+  );
+
+  if (partners.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-list-empty";
+    empty.textContent = "No chats yet — search for a username above to start one.";
+    chatList.appendChild(empty);
+    return;
+  }
+
+  for (const partner of partners) {
+    const s = chatSummaries[partner];
+    const item = document.createElement("div");
+    item.className = "chat-item";
+    item.setAttribute("role", "button");
+    item.tabIndex = 0;
+
+    const info = document.createElement("div");
+    info.className = "chat-item-info";
+
+    const top = document.createElement("div");
+    top.className = "chat-item-top";
+    const name = document.createElement("span");
+    name.className = "chat-item-name";
+    name.textContent = profileCache[partner] || "Someone";
+    const time = document.createElement("span");
+    time.className = "chat-item-time";
+    time.textContent = timeLabel(s.last.created_at);
+    top.appendChild(name);
+    top.appendChild(time);
+
+    const bottom = document.createElement("div");
+    bottom.className = "chat-item-bottom";
+    const preview = document.createElement("span");
+    preview.className = "chat-item-preview";
+    preview.textContent = previewText(s.last);
+    bottom.appendChild(preview);
+    if (s.unread > 0) {
+      const badge = document.createElement("span");
+      badge.className = "chat-item-badge";
+      badge.textContent = s.unread;
+      bottom.appendChild(badge);
+    }
+
+    info.appendChild(top);
+    info.appendChild(bottom);
+    item.appendChild(info);
+    item.addEventListener("click", () => openConversation(partner));
+    item.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openConversation(partner);
+      }
+    });
+    chatList.appendChild(item);
+  }
+}
+
+// A new/updated message arrived while we're not inside that conversation:
+// refresh the affected row's preview and unread badge.
+function updateChatSummaryFor(msg) {
+  const partner = msg.sender_id === currentUser.id ? msg.recipient_id : msg.sender_id;
+  const s = (chatSummaries[partner] ||= { last: null, unread: 0 });
+  if (!s.last || new Date(msg.created_at) >= new Date(s.last.created_at)) s.last = msg;
+  if (msg.recipient_id === currentUser.id && !msg.seen_at && currentPartner !== partner) s.unread++;
+  if (!chatsScreen.classList.contains("hidden")) renderChatList();
+}
+
+// ---------- User search ----------
+let searchDebounce = null;
+
+userSearch.addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  const term = userSearch.value.trim().toLowerCase();
+  if (term.length < 2) {
+    hideSearchResults();
+    return;
+  }
+  searchDebounce = setTimeout(() => runUserSearch(term), 250);
+});
+
+async function runUserSearch(term) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id, display_name, username")
+    .ilike("username", `%${term}%`)
+    .neq("id", currentUser.id)
+    .limit(10);
+  if (error) return console.error(error);
+
+  searchResults.innerHTML = "";
+  if (data.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "search-empty";
+    empty.textContent = `No user "@${term}" found.`;
+    searchResults.appendChild(empty);
+  } else {
+    for (const p of data) {
+      profileCache[p.id] = p.display_name;
+      const row = document.createElement("div");
+      row.className = "search-result";
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      const name = document.createElement("span");
+      name.className = "search-result-name";
+      name.textContent = p.display_name;
+      const username = document.createElement("span");
+      username.className = "search-result-username";
+      username.textContent = p.username;
+      row.appendChild(name);
+      row.appendChild(username);
+      row.addEventListener("click", () => openConversation(p.id));
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openConversation(p.id);
+        }
+      });
+      searchResults.appendChild(row);
+    }
+  }
+  searchResults.classList.remove("hidden");
+}
+
+function hideSearchResults() {
+  searchResults.classList.add("hidden");
+  searchResults.innerHTML = "";
+}
+
+// Dismiss search results when tapping elsewhere on the chats screen
+chatsScreen.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-bar")) hideSearchResults();
+});
+
+// ---------- Load message history (current conversation) ----------
 async function loadMessages() {
   const { data, error } = await supabaseClient
     .from("messages")
     .select("*")
+    .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${currentPartner}),and(sender_id.eq.${currentPartner},recipient_id.eq.${currentUser.id})`)
     .order("created_at", { ascending: true })
     .limit(200);
   if (error) return console.error(error);
@@ -385,7 +631,9 @@ function closeSettings() {
   settingsOverlay.classList.add("hidden");
 }
 
-settingsButton.addEventListener("click", openSettings);
+settingsButtons.forEach((button) => {
+  if (button) button.addEventListener("click", openSettings);
+});
 settingsCancel.addEventListener("click", closeSettings);
 
 // Click on the dark backdrop (outside the card) closes the modal too.
@@ -454,9 +702,18 @@ settingsSave.addEventListener("click", async () => {
 });
 
 async function refreshMessageNames() {
+  // Called after a self-rename, which can happen from the chats list too —
+  // no conversation open means nothing to re-render there.
+  if (!currentPartner) {
+    renderChatList();
+    return;
+  }
+  // Same filtered query as loadMessages: re-rendering must only ever draw
+  // the open conversation, not rows from the user's other chats.
   const { data, error } = await supabaseClient
     .from("messages")
     .select("*")
+    .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${currentPartner}),and(sender_id.eq.${currentPartner},recipient_id.eq.${currentUser.id})`)
     .order("created_at", { ascending: true })
     .limit(200);
   if (error) return console.error(error);
@@ -552,27 +809,87 @@ function subscribeRealtime() {
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
       async (payload) => {
-        if (!profileCache[payload.new.sender_id]) {
-          await ensureProfileCached(payload.new.sender_id);
+        const msg = payload.new;
+        // RLS means we only ever see rows we're sender or recipient of.
+        if (msg.sender_id !== currentUser.id && msg.recipient_id !== currentUser.id) return;
+        handleIncomingMessage(msg);
+      }
+    )
+    // Read receipts: the recipient marking my messages seen flips my
+    // single tick to a double tick in place.
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages" },
+      (payload) => {
+        const msg = payload.new;
+        if (!msg.seen_at || payload.old.seen_at) return;
+        const row = messageRowById[msg.id];
+        if (row) {
+          const tick = row.querySelector(".tick");
+          if (tick) {
+            tick.textContent = "✓✓";
+            tick.classList.add("seen");
+          }
         }
-        const wasNearBottom = isNearBottom();
-        renderMessage(payload.new);
-        if (wasNearBottom) {
-          scrollToBottom();
-        } else if (payload.new.sender_id !== currentUser?.id) {
-          unseenWhileScrolledUp++;
-          updateJumpBottom();
-        }
-        // Someone's message arrived, so they're done typing
-        clearTyping(payload.new.sender_id);
+        if (msg.sender_id === currentUser.id) updateChatSummaryFor(msg);
       }
     )
     .subscribe();
 }
 
+function handleIncomingMessage(msg) {
+  const mine = msg.sender_id === currentUser.id;
+  const isOpenConversation = currentPartner !== null &&
+    (mine ? msg.recipient_id === currentPartner : msg.sender_id === currentPartner);
+
+  if (isOpenConversation) {
+    if (!profileCache[msg.sender_id]) ensureProfileCached(msg.sender_id);
+    const wasNearBottom = isNearBottom();
+    renderMessage(msg);
+    if (wasNearBottom || mine) {
+      scrollToBottom();
+    } else {
+      unseenWhileScrolledUp++;
+      updateJumpBottom();
+    }
+    // The message arrived in the open chat — mark it seen right away, but
+    // only if the tab is actually visible: a backgrounded tab doesn't "see"
+    // anything (and its push notification shouldn't be contradicted by an
+    // instant double tick for the sender).
+    if (!mine && document.visibilityState === "visible") markConversationSeen();
+    // Someone's message arrived, so they're done typing
+    clearTyping(msg.sender_id);
+  }
+
+  updateChatSummaryFor(msg);
+}
+
+// ---------- Read receipts ----------
+// Marks everything my partner sent me in this conversation as seen. Called
+// when opening a chat and whenever a new message arrives while it's open.
+async function markConversationSeen() {
+  if (!currentPartner || !currentUser) return;
+  const { error } = await supabaseClient
+    .from("messages")
+    .update({ seen_at: new Date().toISOString() })
+    .eq("recipient_id", currentUser.id)
+    .eq("sender_id", currentPartner)
+    .is("seen_at", null);
+  if (error) console.error(error);
+}
+
 // ---------- Typing indicator (Realtime broadcast, no DB writes) ----------
+// One broadcast channel per user pair, so typing signals stay within that
+// conversation and don't leak into other chats.
+function pairChannelName(a, b) {
+  return `typing:${[a, b].sort().join(":")}`;
+}
+
 function subscribeTyping() {
-  typingChannel = supabaseClient.channel("typing", {
+  // Re-entering the same conversation shouldn't stack duplicate channels.
+  if (typingChannel) supabaseClient.removeChannel(typingChannel);
+
+  typingChannel = supabaseClient.channel(pairChannelName(currentUser.id, currentPartner), {
     config: { broadcast: { self: false } },
   });
 
@@ -583,9 +900,12 @@ function subscribeTyping() {
     })
     .subscribe();
 
+  // Assign (not addEventListener) so switching conversations replaces the
+  // old handler instead of stacking a new one per opened chat — and the
+  // handler below no-ops if its channel has since been closed.
   let lastTypingSent = 0;
-  messageInput.addEventListener("input", () => {
-    if (!messageInput.value.trim()) return;
+  messageInput.oninput = () => {
+    if (!typingChannel || !messageInput.value.trim()) return;
     const now = Date.now();
     if (now - lastTypingSent < 2000) return;
     lastTypingSent = now;
@@ -594,7 +914,7 @@ function subscribeTyping() {
       event: "typing",
       payload: { user_id: currentUser.id, name: profileCache[currentUser.id] || "Someone" },
     });
-  });
+  };
 }
 
 const activeTypers = {}; // user_id -> name
@@ -749,7 +1069,13 @@ function renderMessage(msg) {
   if (mine) {
     const tick = document.createElement("span");
     tick.className = "tick";
-    tick.textContent = "✓";
+    // Single tick when sent, double (accent blue) once the recipient saw it
+    if (msg.seen_at) {
+      tick.textContent = "✓✓";
+      tick.classList.add("seen");
+    } else {
+      tick.textContent = "✓";
+    }
     meta.appendChild(tick);
   }
   bubble.appendChild(meta);
@@ -949,7 +1275,12 @@ function scheduleReturnRestore() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") scheduleReturnRestore();
+  if (document.visibilityState === "visible") {
+    scheduleReturnRestore();
+    // Messages that arrived while the tab was hidden (so weren't marked
+    // seen) get read now that the user is actually looking at the chat.
+    if (currentPartner) markConversationSeen();
+  }
 });
 
 window.addEventListener("pageshow", scheduleReturnRestore);
@@ -984,7 +1315,7 @@ composer.addEventListener("submit", async (e) => {
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, body: text, reply_to: replyId });
+    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, body: text, reply_to: replyId });
   if (error) {
     console.error(error);
     // The message never made it to the server — put it back so nothing is
@@ -1030,7 +1361,7 @@ attachInput.addEventListener("change", async () => {
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, media_path: path, media_type: file.type, reply_to: replyId });
+    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, media_path: path, media_type: file.type, reply_to: replyId });
   if (error) {
     console.error(error);
     showComposerError("The image uploaded, but the message couldn't be sent. Try attaching it again.");
