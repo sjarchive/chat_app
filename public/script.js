@@ -14,10 +14,19 @@ const attachButton = document.getElementById("attach-button");
 const attachInput = document.getElementById("attach-input");
 const signOutBtn = document.getElementById("sign-out");
 const memberCount = document.getElementById("member-count");
+const jumpBottom = document.getElementById("jump-bottom");
+const jumpBottomCount = document.getElementById("jump-bottom-count");
+const typingIndicator = document.getElementById("typing-indicator");
 
 let isSignUpMode = false;
 let currentUser = null;
 let profileCache = {}; // id -> {display_name}
+let lastRenderedSenderId = null;
+let lastRenderedDay = null;
+let lastRowElement = null;
+let unseenWhileScrolledUp = 0;
+let typingTimers = {}; // user_id -> timeout handle
+let typingChannel = null;
 
 // ---------- Auth mode toggle ----------
 authToggle.addEventListener("click", () => {
@@ -128,6 +137,7 @@ async function enterChat() {
   await loadProfiles();
   await loadMessages();
   subscribeRealtime();
+  subscribeTyping();
 }
 
 // ---------- Profiles ----------
@@ -147,6 +157,9 @@ async function loadMessages() {
     .limit(200);
   if (error) return console.error(error);
   messageList.innerHTML = "";
+  lastRenderedSenderId = null;
+  lastRenderedDay = null;
+  lastRowElement = null;
   data.forEach(renderMessage);
   scrollToBottom();
 }
@@ -159,23 +172,122 @@ function subscribeRealtime() {
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
       (payload) => {
+        const wasNearBottom = isNearBottom();
         renderMessage(payload.new);
-        scrollToBottom();
+        if (wasNearBottom) {
+          scrollToBottom();
+        } else if (payload.new.sender_id !== currentUser?.id) {
+          unseenWhileScrolledUp++;
+          updateJumpBottom();
+        }
+        // Someone's message arrived, so they're done typing
+        clearTyping(payload.new.sender_id);
       }
     )
     .subscribe();
 }
 
+// ---------- Typing indicator (Realtime broadcast, no DB writes) ----------
+function subscribeTyping() {
+  typingChannel = supabaseClient.channel("typing", {
+    config: { broadcast: { self: false } },
+  });
+
+  typingChannel
+    .on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (payload.user_id === currentUser?.id) return;
+      showTyping(payload.user_id, payload.name);
+    })
+    .subscribe();
+
+  let lastTypingSent = 0;
+  messageInput.addEventListener("input", () => {
+    if (!messageInput.value.trim()) return;
+    const now = Date.now();
+    if (now - lastTypingSent < 2000) return;
+    lastTypingSent = now;
+    typingChannel.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { user_id: currentUser.id, name: profileCache[currentUser.id] || "Someone" },
+    });
+  });
+}
+
+const activeTypers = {}; // user_id -> name
+
+function showTyping(userId, name) {
+  activeTypers[userId] = name;
+  clearTimeout(typingTimers[userId]);
+  typingTimers[userId] = setTimeout(() => clearTyping(userId), 3000);
+  renderTypingIndicator();
+}
+
+function clearTyping(userId) {
+  delete activeTypers[userId];
+  clearTimeout(typingTimers[userId]);
+  renderTypingIndicator();
+}
+
+function renderTypingIndicator() {
+  const names = Object.values(activeTypers);
+  if (names.length === 0) {
+    typingIndicator.classList.add("hidden");
+    typingIndicator.textContent = "";
+    return;
+  }
+  const text =
+    names.length === 1
+      ? `${names[0]} is typing…`
+      : names.length === 2
+      ? `${names[0]} and ${names[1]} are typing…`
+      : `${names.length} people are typing…`;
+  typingIndicator.textContent = text;
+  typingIndicator.classList.remove("hidden");
+}
+
+// ---------- Day dividers ----------
+function dayLabel(date) {
+  const now = new Date();
+  const d = new Date(date);
+  const isSameDay = (a, b) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameDay(d, now)) return "Today";
+  if (isSameDay(d, yesterday)) return "Yesterday";
+  return d.toLocaleDateString([], { month: "long", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+}
+
 // ---------- Render a message bubble ----------
 function renderMessage(msg) {
   const mine = msg.sender_id === currentUser?.id;
+  const msgDay = new Date(msg.created_at).toDateString();
+
+  if (msgDay !== lastRenderedDay) {
+    const divider = document.createElement("div");
+    divider.className = "day-divider";
+    divider.textContent = dayLabel(msg.created_at);
+    messageList.appendChild(divider);
+    lastRenderedDay = msgDay;
+    lastRenderedSenderId = null; // force a fresh group after a day divider
+  }
+
+  const isGrouped = lastRenderedSenderId === msg.sender_id;
+
+  // The previous row (if same sender) is no longer the last in its group
+  if (isGrouped && lastRowElement) {
+    lastRowElement.classList.remove("group-last");
+  }
+
   const row = document.createElement("div");
-  row.className = `msg-row ${mine ? "mine" : "theirs"}`;
+  row.className = `msg-row ${mine ? "mine" : "theirs"} group-last ${isGrouped ? "grouped" : "group-start"}`;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
 
-  if (!mine) {
+  if (!mine && !isGrouped) {
     const nameEl = document.createElement("span");
     nameEl.className = "sender-name";
     nameEl.textContent = profileCache[msg.sender_id] || "Someone";
@@ -197,16 +309,55 @@ function renderMessage(msg) {
 
   const meta = document.createElement("span");
   meta.className = "meta";
-  meta.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeText = document.createElement("span");
+  timeText.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  meta.appendChild(timeText);
+  if (mine) {
+    const tick = document.createElement("span");
+    tick.className = "tick";
+    tick.textContent = "✓";
+    meta.appendChild(tick);
+  }
   bubble.appendChild(meta);
 
   row.appendChild(bubble);
   messageList.appendChild(row);
+
+  lastRenderedSenderId = msg.sender_id;
+  lastRowElement = row;
+}
+
+function isNearBottom() {
+  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 80;
 }
 
 function scrollToBottom() {
   messageList.scrollTop = messageList.scrollHeight;
+  unseenWhileScrolledUp = 0;
+  updateJumpBottom();
 }
+
+function updateJumpBottom() {
+  if (unseenWhileScrolledUp > 0) {
+    jumpBottomCount.textContent = unseenWhileScrolledUp;
+    jumpBottom.classList.remove("hidden");
+  } else {
+    jumpBottom.classList.add("hidden");
+  }
+}
+
+messageList.addEventListener("scroll", () => {
+  if (isNearBottom() && unseenWhileScrolledUp > 0) {
+    unseenWhileScrolledUp = 0;
+    updateJumpBottom();
+  }
+});
+
+jumpBottom.addEventListener("click", () => {
+  messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
+  unseenWhileScrolledUp = 0;
+  updateJumpBottom();
+});
 
 // ---------- Sending ----------
 composer.addEventListener("submit", async (e) => {
