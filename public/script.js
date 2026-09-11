@@ -509,7 +509,7 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
       bubble.style.transform = `translateX(${-reveal}px)`;
     }
     replyBtn.style.width = reveal + "px";
-    replyBtn.style.padding = reveal > 0 ? "6px" : "0px";
+    replyBtn.style.padding = (reveal * 0.15).toFixed(1) + "px"; // scales to 6px at MAX_REVEAL, same as the hover state
     replyBtn.style.opacity = Math.min(1, dragDistance / THRESHOLD).toFixed(2);
     e.preventDefault();
   }, { passive: false });
