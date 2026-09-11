@@ -32,6 +32,7 @@ const settingsName = document.getElementById("settings-name");
 const settingsError = document.getElementById("settings-error");
 const settingsSave = document.getElementById("settings-save");
 const settingsCancel = document.getElementById("settings-cancel");
+const composerError = document.getElementById("composer-error");
 
 let isSignUpMode = false;
 let currentUser = null;
@@ -264,6 +265,9 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
     enterChat();
   } else {
     currentUser = null;
+    // Sign-out removed this user's push subscription rows, so allow
+    // subscribeToPush to run again if they sign back in this session.
+    pushSubscribedForUser = null;
     authScreen.classList.remove("hidden");
     chatScreen.classList.add("hidden");
   }
@@ -701,20 +705,34 @@ function renderMessage(msg) {
 
   if (msg.media_path) {
     const mediaUrl = supabaseClient.storage.from("chat-media").getPublicUrl(msg.media_path).data.publicUrl;
-    const img = document.createElement("img");
-    img.className = "media";
-    img.src = mediaUrl;
-    img.addEventListener("click", () => {
-      // Remember exactly which message opened the external file. When the user
-      // returns to this chat, restore the viewport to this message instead of
-      // jumping to the newest message.
-      try {
-        sessionStorage.setItem("circle-return-message-id", String(msg.id));
-        sessionStorage.setItem("circle-return-scroll-top", String(messageList.scrollTop));
-      } catch (e) {}
-      window.open(mediaUrl, "_blank", "noopener,noreferrer");
-    });
-    bubble.appendChild(img);
+    if ((msg.media_type || "").startsWith("image/")) {
+      const img = document.createElement("img");
+      img.className = "media";
+      img.src = mediaUrl;
+      img.alt = "Photo";
+      img.addEventListener("click", () => {
+        // Remember exactly which message opened the external file. When the user
+        // returns to this chat, restore the viewport to this message instead of
+        // jumping to the newest message.
+        try {
+          sessionStorage.setItem("circle-return-message-id", String(msg.id));
+          sessionStorage.setItem("circle-return-scroll-top", String(messageList.scrollTop));
+        } catch (e) {}
+        window.open(mediaUrl, "_blank", "noopener,noreferrer");
+      });
+      bubble.appendChild(img);
+    } else {
+      // Attachments that aren't images (e.g. from older clients or direct API
+      // inserts) would render as a broken <img> — show a tappable file chip
+      // linking to the stored file instead.
+      const link = document.createElement("a");
+      link.className = "media-file";
+      link.href = mediaUrl;
+      link.target = "_blank";
+      link.rel = "noopener,noreferrer";
+      link.textContent = "📎 Attachment";
+      bubble.appendChild(link);
+    }
   }
 
   if (msg.body) {
@@ -936,18 +954,46 @@ document.addEventListener("visibilitychange", () => {
 
 window.addEventListener("pageshow", scheduleReturnRestore);
 
+// ---------- Composer errors ----------
+// Failed sends/uploads are otherwise silent (the input is already cleared by
+// then), which reads as the app eating the message. Show a short inline
+// banner instead, and clear it as soon as the user tries again.
+let composerErrorTimer = null;
+
+function showComposerError(text) {
+  composerError.textContent = text;
+  composerError.classList.remove("hidden");
+  clearTimeout(composerErrorTimer);
+  composerErrorTimer = setTimeout(hideComposerError, 6000);
+}
+
+function hideComposerError() {
+  composerError.classList.add("hidden");
+  composerError.textContent = "";
+  clearTimeout(composerErrorTimer);
+}
+
 // ---------- Sending ----------
 composer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = messageInput.value.trim();
   if (!text) return;
+  const replyId = replyingTo?.id || null;
   messageInput.value = "";
+  hideComposerError();
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, body: text, reply_to: replyingTo?.id || null });
-  if (error) console.error(error);
-  cancelReply();
+    .insert({ sender_id: currentUser.id, body: text, reply_to: replyId });
+  if (error) {
+    console.error(error);
+    // The message never made it to the server — put it back so nothing is
+    // lost. The reply context was never cancelled, so it stays for the retry.
+    messageInput.value = text;
+    showComposerError("Couldn't send — check your connection and try again.");
+  } else {
+    cancelReply();
+  }
 });
 
 // ---------- Media attach ----------
@@ -957,23 +1003,40 @@ attachInput.addEventListener("change", async () => {
   const file = attachInput.files[0];
   attachInput.value = "";
   if (!file) return;
+  hideComposerError();
 
-  if (file.size > 8 * 1024 * 1024) {
-    alert("Please choose a file under 8MB.");
+  // The picker filters to images via accept="image/*", but that's a hint,
+  // not a guarantee — drag-dropped or re-named files still come through.
+  if (!file.type.startsWith("image/")) {
+    showComposerError("Only image files can be sent.");
     return;
   }
 
+  if (file.size > 8 * 1024 * 1024) {
+    showComposerError("That image is over 8MB — please choose a smaller one.");
+    return;
+  }
+
+  const replyId = replyingTo?.id || null;
   const path = `${currentUser.id}/${Date.now()}-${file.name}`;
   const { error: uploadError } = await supabaseClient.storage
     .from("chat-media")
     .upload(path, file);
-  if (uploadError) return console.error(uploadError);
+  if (uploadError) {
+    console.error(uploadError);
+    showComposerError("Couldn't upload the image — check your connection and try again.");
+    return; // no message row was created, so the reply context can stay put
+  }
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, media_path: path, media_type: file.type, reply_to: replyingTo?.id || null });
-  if (error) console.error(error);
-  cancelReply();
+    .insert({ sender_id: currentUser.id, media_path: path, media_type: file.type, reply_to: replyId });
+  if (error) {
+    console.error(error);
+    showComposerError("The image uploaded, but the message couldn't be sent. Try attaching it again.");
+  } else {
+    cancelReply();
+  }
 });
 
 // ---------- Service worker + push notifications ----------
@@ -981,7 +1044,10 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("/sw.js");
-      // Only ask for push once the user is actually signed in and in the chat
+      // Only ask for push once the user is actually signed in and in the chat.
+      // onAuthStateChange also fires for TOKEN_REFRESHED whenever the tab
+      // regains focus, so without the guard inside subscribeToPush that would
+      // re-request notification permission (and re-upsert) on every focus.
       supabaseClient.auth.onAuthStateChange((_event, session) => {
         if (session?.user) subscribeToPush(registration, session.user.id);
       });
@@ -998,31 +1064,47 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
+let pushSubscribeInFlight = false;
+let pushSubscribedForUser = null;
+
 async function subscribeToPush(registration, userId) {
   if (Notification.permission === "denied") return;
+  // Re-auth/token-refresh events fire this repeatedly for the same user;
+  // permission was already asked (or the subscription already recorded) on
+  // the first pass, so those re-runs would just prompt again for nothing.
+  if (pushSubscribedForUser === userId || pushSubscribeInFlight) return;
+  pushSubscribeInFlight = true;
 
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") return;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
 
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+
+    const json = subscription.toJSON();
+    const { error } = await supabaseClient.from("push_subscriptions").upsert(
+      {
+        user_id: userId,
+        endpoint: json.endpoint,
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+      },
+      { onConflict: "endpoint" }
+    );
+    if (error) {
+      console.error(error);
+      return;
+    }
+    pushSubscribedForUser = userId;
+  } finally {
+    pushSubscribeInFlight = false;
   }
-
-  const json = subscription.toJSON();
-  const { error } = await supabaseClient.from("push_subscriptions").upsert(
-    {
-      user_id: userId,
-      endpoint: json.endpoint,
-      p256dh: json.keys.p256dh,
-      auth: json.keys.auth,
-    },
-    { onConflict: "endpoint" }
-  );
-  if (error) console.error(error);
 }
 
 // ---------- Keep layout height accurate when the mobile keyboard opens/closes ----------
