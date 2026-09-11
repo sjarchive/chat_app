@@ -198,10 +198,19 @@ html, body {
   line-height: 1;
   cursor: pointer;
   padding: 4px;
-  opacity: 0.55;
+  opacity: 0; /* hidden until revealed by hover (desktop) or swipe (mobile, via JS) */
   flex-shrink: 0;
+  transition: opacity 0.15s ease;
 }
-.reply-trigger:hover { opacity: 1; }
+
+/* Desktop / mouse: reveal on hover over the row, same as before */
+@media (hover: hover) and (pointer: fine) {
+  .msg-row:hover .reply-trigger { opacity: 0.55; }
+  .reply-trigger:hover { opacity: 1; }
+}
+
+/* Let JS own horizontal drag on the bubble while still allowing normal vertical scroll */
+.bubble { touch-action: pan-y; }
 
 .quoted-msg {
   display: flex;
