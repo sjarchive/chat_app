@@ -200,6 +200,7 @@ html, body {
   box-sizing: border-box;
   padding: 6px;
   width: 0; /* collapsed at rest — reserves no space, so bubbles stay flush to the edge */
+  min-width: 0; /* flex items default to min-width:auto, which ignores width:0 when there's content */
   overflow: hidden;
   opacity: 0; /* revealed by hover (desktop) or swipe (mobile, via JS) */
   flex-shrink: 0;
