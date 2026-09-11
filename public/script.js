@@ -509,6 +509,7 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
       bubble.style.transform = `translateX(${-reveal}px)`;
     }
     replyBtn.style.width = reveal + "px";
+    replyBtn.style.padding = reveal > 0 ? "6px" : "0px";
     replyBtn.style.opacity = Math.min(1, dragDistance / THRESHOLD).toFixed(2);
     e.preventDefault();
   }, { passive: false });
@@ -516,8 +517,9 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
   function endSwipe() {
     if (!dragging) return;
     dragging = false;
-    replyBtn.style.transition = "width 0.18s ease, opacity 0.15s ease";
+    replyBtn.style.transition = "width 0.18s ease, padding 0.18s ease, opacity 0.15s ease";
     replyBtn.style.width = "0px";
+    replyBtn.style.padding = "0px";
     replyBtn.style.opacity = "0";
     if (!mine) {
       bubble.style.transition = "transform 0.18s ease";
