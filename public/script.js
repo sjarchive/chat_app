@@ -662,12 +662,18 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
   function endSwipe() {
     if (!dragging) return;
     dragging = false;
-    replyBtn.style.transition = "width 0.18s ease, padding 0.18s ease, opacity 0.15s ease";
+    // Mirrors .reply-trigger's stylesheet transition, including the theme
+    // properties: this inline style overrides the stylesheet, so omitting
+    // them here would leave a swiped message's reply icon outside the
+    // light/dark cross-fade.
+    replyBtn.style.transition = "width 0.18s ease, padding 0.18s ease, opacity 0.15s ease, background-color 0.3s ease, color 0.3s ease";
     replyBtn.style.width = "0px";
     replyBtn.style.padding = "0px";
     replyBtn.style.opacity = "0";
     if (!mine) {
-      bubble.style.transition = "transform 0.18s ease";
+      // Same reasoning as replyBtn above: inline transition overrides the
+      // universal theme transition, so include the theme properties here too.
+      bubble.style.transition = "transform 0.18s ease, background-color 0.3s ease, color 0.3s ease";
       bubble.style.transform = "translateX(0)";
       replyBtn.style.transition += ", transform 0.18s ease";
       replyBtn.style.transform = "translateX(0)";
