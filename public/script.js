@@ -227,6 +227,15 @@ async function unsubscribeFromPush() {
 // ---------- Session handling ----------
 supabaseClient.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
+    // Supabase re-fires this event (e.g. TOKEN_REFRESHED) whenever the tab
+    // regains focus/visibility, not just on real sign-in. Without this guard,
+    // switching back to this tab after opening a media file re-ran enterChat()
+    // -> loadMessages(), which wiped and re-rendered the message list *after*
+    // the scroll-restore logic had already consumed and cleared its saved
+    // position, so you'd land back at the newest message instead. It also
+    // opened duplicate realtime/typing channels on every focus. Only run the
+    // full init when this is actually a different/new session.
+    if (currentUser?.id === session.user.id) return;
     currentUser = session.user;
     enterChat();
   } else {

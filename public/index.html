@@ -3,11 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <script>
-  // Apply the saved theme before first paint, so there's no flash of the wrong theme.
+  // Apply the saved theme, and mark whether a session looks logged-in, before
+  // first paint - so there's no flash of the wrong theme or of the barebone
+  // auth screen. This has to run in <head>, before the body's HTML is even
+  // parsed, and the has-session result has to be applied via CSS (not a
+  // script later in <body>) so there's no moment where the auth screen can
+  // get painted un-hidden first. Real session validation still happens in
+  // script.js; this only prevents the flash while that check runs.
   (function () {
     try {
       var t = localStorage.getItem("circle-theme") || "dark";
       document.documentElement.setAttribute("data-theme", t);
+      var hasSession = Object.keys(localStorage).some(function (key) {
+        return key.indexOf("sb-") === 0 && key.indexOf("-auth-token") !== -1 && localStorage.getItem(key);
+      });
+      if (hasSession) document.documentElement.classList.add("has-session");
     } catch (e) {}
   })();
 </script>
@@ -27,6 +37,13 @@
   }
   .password-toggle:hover, .password-toggle:focus-visible { opacity: 1; }
   .password-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+
+  /* Paired with the has-session class set in the head script above: applies
+     as soon as these elements are inserted, before script.js finishes its
+     real auth check, so refreshing while logged in never shows a flash of
+     the auth screen. !important matches .hidden's own specificity. */
+  html.has-session #auth-screen { display: none !important; }
+  html.has-session #chat-screen.hidden { display: flex !important; }
 </style>
 </head>
 <body>
@@ -95,24 +112,6 @@
       <button type="submit" id="send-button" class="send-button" aria-label="Send">➤</button>
     </form>
   </div>
-
-  <script>
-    // If a Supabase session is already persisted in localStorage, show the chat
-    // screen immediately instead of the auth screen, so there's no flash of the
-    // sign-in page on refresh while real session validation happens below.
-    // (Mirrors the theme flash-prevention script at the top of <head>.)
-    (function () {
-      try {
-        var hasSession = Object.keys(localStorage).some(function (key) {
-          return key.indexOf("sb-") === 0 && key.indexOf("-auth-token") !== -1 && localStorage.getItem(key);
-        });
-        if (hasSession) {
-          document.getElementById("auth-screen").classList.add("hidden");
-          document.getElementById("chat-screen").classList.remove("hidden");
-        }
-      } catch (e) {}
-    })();
-  </script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="/supabase-config.js"></script>
