@@ -188,7 +188,7 @@ html, body {
 }
 
 /* ---------- Reply-to ---------- */
-.msg-row { align-items: flex-end; gap: 4px; }
+.msg-row { align-items: flex-end; }
 
 .reply-trigger {
   background: none;
