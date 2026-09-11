@@ -22,7 +22,7 @@ html, body {
 .hidden { display: none !important; }
 .hidden-field { display: none; }
 
-.screen { height: 100dvh; display: flex; flex-direction: column; }
+.screen { height: 100dvh; display: flex; flex-direction: column; position: relative; }
 
 /* ---------- Auth ---------- */
 #auth-screen { align-items: center; justify-content: center; padding: 24px; }
@@ -99,9 +99,12 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  position: relative;
 }
 
-.msg-row { display: flex; margin-bottom: 6px; }
+.msg-row { display: flex; margin-bottom: 2px; }
+.msg-row.grouped { margin-bottom: 2px; }
+.msg-row.group-start { margin-top: 10px; }
 .msg-row.mine { justify-content: flex-end; }
 .msg-row.theirs { justify-content: flex-start; }
 
@@ -116,6 +119,12 @@ html, body {
 .mine .bubble { background: var(--mine); color: white; border-bottom-right-radius: 4px; }
 .theirs .bubble { background: var(--surface-2); color: var(--text); border-bottom-left-radius: 4px; }
 
+/* Tighten the tail-corner only on the last bubble of a consecutive group */
+.mine .bubble { border-radius: 14px; }
+.theirs .bubble { border-radius: 14px; }
+.msg-row.mine.group-last .bubble { border-bottom-right-radius: 4px; }
+.msg-row.theirs.group-last .bubble { border-bottom-left-radius: 4px; }
+
 .bubble .sender-name {
   display: block;
   font-size: 12px;
@@ -125,13 +134,17 @@ html, body {
 }
 
 .bubble .meta {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
   font-size: 10px;
   color: rgba(255,255,255,0.55);
   margin-top: 3px;
-  text-align: right;
 }
 .theirs .bubble .meta { color: var(--text-dim); }
+
+.bubble .meta .tick { font-size: 11px; }
 
 .bubble img.media {
   max-width: 100%;
@@ -145,6 +158,32 @@ html, body {
   color: var(--text-dim);
   font-size: 11px;
   margin: 14px 0 6px;
+}
+
+.typing-indicator {
+  padding: 2px 16px 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+.jump-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 78px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid #2A313C;
+  border-radius: 20px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 5;
 }
 
 /* ---------- Composer ---------- */
