@@ -26,6 +26,12 @@ const replyPreview = document.getElementById("reply-preview");
 const replyPreviewName = document.getElementById("reply-preview-name");
 const replyPreviewText = document.getElementById("reply-preview-text");
 const replyPreviewCancel = document.getElementById("reply-preview-cancel");
+const settingsButton = document.getElementById("settings-button");
+const settingsOverlay = document.getElementById("settings-overlay");
+const settingsName = document.getElementById("settings-name");
+const settingsError = document.getElementById("settings-error");
+const settingsSave = document.getElementById("settings-save");
+const settingsCancel = document.getElementById("settings-cancel");
 
 let isSignUpMode = false;
 let currentUser = null;
@@ -245,6 +251,52 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
   }
 });
 
+// ---------- Live profile updates ----------
+// Someone renaming themselves in Settings should show up in everyone's open
+// tab immediately: update the cache and patch the DOM in place (name labels,
+// quoted replies, typing indicator) rather than re-rendering the whole list,
+// which would reset scroll position for other viewers.
+function subscribeProfiles() {
+  supabaseClient
+    .channel("public:profiles")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "profiles" },
+      (payload) => {
+        const { id, display_name } = payload.new;
+        if (!id || profileCache[id] === display_name) return;
+        profileCache[id] = display_name;
+
+        // The row elements know their sender via dataset.msgId -> message,
+        // but simpler: walk rows and match the cached message's sender.
+        for (const row of messageList.querySelectorAll(".msg-row")) {
+          const msg = messageCache[row.dataset.msgId];
+          if (!msg) continue;
+          if (msg.sender_id === id) {
+            const nameEl = row.querySelector(".sender-name");
+            if (nameEl) nameEl.textContent = display_name;
+          }
+          // Quoted names show the *quoted* message's sender ("You" for own
+          // quotes), so only patch when the original was written by this user.
+          if (msg.reply_to) {
+            const original = messageCache[msg.reply_to];
+            if (original && original.sender_id === id) {
+              const qName = row.querySelector(".quoted-name");
+              if (qName && qName.textContent !== "You") qName.textContent = display_name;
+            }
+          }
+        }
+
+        // A rename mid-typing should update the "… is typing" text too
+        if (activeTypers[id]) {
+          activeTypers[id] = display_name;
+          renderTypingIndicator();
+        }
+      }
+    )
+    .subscribe();
+}
+
 async function enterChat() {
   authScreen.classList.add("hidden");
   chatScreen.classList.remove("hidden");
@@ -252,6 +304,7 @@ async function enterChat() {
   await loadMessages();
   subscribeRealtime();
   subscribeTyping();
+  subscribeProfiles();
 }
 
 // ---------- Profiles ----------
@@ -270,12 +323,7 @@ async function loadMessages() {
     .order("created_at", { ascending: true })
     .limit(200);
   if (error) return console.error(error);
-  messageList.innerHTML = "";
-  lastRenderedSenderId = null;
-  lastRenderedDay = null;
-  lastRowElement = null;
-  messageRowById = {}; // old rows are gone, forget where they were
-  data.forEach(renderMessage);
+  renderAllMessages(data);
 
   // Normally open the chat at the newest message. If the user just opened a
   // file from an older message, restore that exact message instead.
@@ -285,6 +333,88 @@ async function loadMessages() {
   if (!restoreReturnMessagePosition()) {
     scrollToBottom();
   }
+}
+
+function renderAllMessages(data) {
+  messageList.innerHTML = "";
+  lastRenderedSenderId = null;
+  lastRenderedDay = null;
+  lastRowElement = null;
+  messageRowById = {}; // old rows are gone, forget where they were
+  data.forEach(renderMessage);
+}
+
+// ---------- Settings (display name) ----------
+function openSettings() {
+  settingsName.value = profileCache[currentUser?.id] || "";
+  settingsError.textContent = "";
+  settingsOverlay.classList.remove("hidden");
+  settingsName.focus();
+}
+
+function closeSettings() {
+  settingsOverlay.classList.add("hidden");
+}
+
+settingsButton.addEventListener("click", openSettings);
+settingsCancel.addEventListener("click", closeSettings);
+
+// Click on the dark backdrop (outside the card) closes the modal too.
+settingsOverlay.addEventListener("click", (e) => {
+  if (e.target === settingsOverlay) closeSettings();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !settingsOverlay.classList.contains("hidden")) closeSettings();
+});
+
+settingsName.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    settingsSave.click();
+  }
+});
+
+settingsSave.addEventListener("click", async () => {
+  const name = settingsName.value;
+  const nameError = validateName(name);
+  if (nameError) {
+    settingsError.textContent = nameError;
+    return;
+  }
+  settingsError.textContent = "";
+  settingsSave.disabled = true;
+
+  try {
+    // upsert (not update) so this also works if the profiles row is somehow
+    // missing for this user yet — e.g. the signup trigger failed once.
+    const { error } = await supabaseClient
+      .from("profiles")
+      .upsert({ id: currentUser.id, display_name: name }, { onConflict: "id" });
+    if (error) throw error;
+
+    profileCache[currentUser.id] = name;
+    closeSettings();
+    // Re-render so the new name shows above this user's already-sent
+    // messages (and in quotes/typing), keeping the current scroll position.
+    await refreshMessageNames();
+  } catch (err) {
+    settingsError.textContent = err.message;
+  } finally {
+    settingsSave.disabled = false;
+  }
+});
+
+async function refreshMessageNames() {
+  const { data, error } = await supabaseClient
+    .from("messages")
+    .select("*")
+    .order("created_at", { ascending: true })
+    .limit(200);
+  if (error) return console.error(error);
+  const scrollTop = messageList.scrollTop;
+  renderAllMessages(data);
+  messageList.scrollTop = Math.min(scrollTop, messageList.scrollHeight);
 }
 
 function truncate(str, n) {
@@ -495,6 +625,8 @@ function renderMessage(msg) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
 
+  // Name only on the first bubble of a consecutive run from the same sender —
+  // grouping makes it obvious the following ones are from the same person.
   if (!mine && !isGrouped) {
     const nameEl = document.createElement("span");
     nameEl.className = "sender-name";

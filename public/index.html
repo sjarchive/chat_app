@@ -423,6 +423,54 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ---------- Settings modal ---------- */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10;
+}
+.settings-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 22px;
+}
+.settings-card h2 { font-size: 18px; font-weight: 600; margin-bottom: 14px; }
+.settings-label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+.settings-hint { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+#settings-name {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+#settings-name:focus { border-color: var(--accent); }
+.settings-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 16px; }
+.settings-actions .link-button { margin-top: 0; }
+#settings-save {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#settings-save:active { opacity: 0.85; }
+#settings-save:disabled { opacity: 0.6; cursor: default; }
+
 /* ---------- Auth-screen password toggle (page-specific) ---------- */
 .password-field { position: relative; width: 100%; }
   .password-field #auth-password { padding-right: 48px; width: 100%; box-sizing: border-box; }
@@ -479,6 +527,9 @@ html, body {
         <span class="chat-sub" id="member-count">—</span>
       </div>
       <div class="header-actions">
+        <button type="button" id="settings-button" class="icon-button" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        </button>
         <button type="button" id="theme-toggle" class="icon-button" aria-label="Toggle theme">
           <svg id="theme-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
         </button>
@@ -508,6 +559,21 @@ html, body {
       <input id="message-input" type="text" placeholder="Message" autocomplete="off" />
       <button type="submit" id="send-button" class="send-button" aria-label="Send">➤</button>
     </form>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-card">
+        <h2 id="settings-title">Settings</h2>
+        <label class="settings-label" for="settings-name">Your name</label>
+        <p class="settings-hint">Shown above the messages you send. Your username (what you sign in with) stays the same.</p>
+        <input id="settings-name" type="text" maxlength="20" autocomplete="nickname" />
+        <p id="settings-error" class="auth-error"></p>
+        <div class="settings-actions">
+          <button type="button" id="settings-cancel" class="link-button">Cancel</button>
+          <button type="button" id="settings-save">Save</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
