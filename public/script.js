@@ -189,13 +189,32 @@ async function loadMessages() {
 }
 
 // ---------- Realtime subscription ----------
+
+// If a message comes in from a sender we don't have cached (e.g. they
+// signed up after we already loaded the profile list), fetch just that
+// one profile instead of showing "Someone" forever.
+async function ensureProfileCached(id) {
+  if (profileCache[id]) return profileCache[id];
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id, display_name")
+    .eq("id", id)
+    .single();
+  if (error || !data) return null;
+  profileCache[id] = data.display_name;
+  return data.display_name;
+}
+
 function subscribeRealtime() {
   supabaseClient
     .channel("public:messages")
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
-      (payload) => {
+      async (payload) => {
+        if (!profileCache[payload.new.sender_id]) {
+          await ensureProfileCached(payload.new.sender_id);
+        }
         const wasNearBottom = isNearBottom();
         renderMessage(payload.new);
         if (wasNearBottom) {
