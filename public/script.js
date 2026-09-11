@@ -386,12 +386,21 @@ settingsSave.addEventListener("click", async () => {
   settingsSave.disabled = true;
 
   try {
-    // upsert (not update) so this also works if the profiles row is somehow
-    // missing for this user yet — e.g. the signup trigger failed once.
-    const { error } = await supabaseClient
+    // Plain update, not upsert: the profiles row already exists (created by
+    // the signup trigger), and the table's RLS only grants users UPDATE on
+    // their own row. An upsert also checks the INSERT policy, which isn't
+    // granted, so it fails with "new row violates row-level security policy".
+    const { data, error } = await supabaseClient
       .from("profiles")
-      .upsert({ id: currentUser.id, display_name: name }, { onConflict: "id" });
+      .update({ display_name: name })
+      .eq("id", currentUser.id)
+      .select();
     if (error) throw error;
+    // An update that matches no row reports no error, so check we got one
+    // back — otherwise the UI would show a name the database never saved.
+    if (!data || data.length === 0) {
+      throw new Error("Couldn't save your name. Try signing out and back in.");
+    }
 
     profileCache[currentUser.id] = name;
     closeSettings();
