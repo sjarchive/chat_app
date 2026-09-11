@@ -210,8 +210,14 @@ html, body {
 .reply-trigger:focus { outline: none; }
 .reply-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Desktop / mouse: reveal on hover over the row — the bubble reflows to make room */
+/* Desktop / mouse: reveal on hover over the row */
 @media (hover: hover) and (pointer: fine) {
+  /* "mine" rows: put the icon before the bubble visually (DOM order stays
+     the same, so mobile's swipe/overlap logic isn't affected) so the
+     bubble — not the icon — is the item anchored to the row's edge, and
+     stays put on hover instead of shifting left. */
+  .msg-row.mine .reply-trigger { order: -1; }
+
   .msg-row:hover .reply-trigger { width: 34px; padding: 6px; opacity: 0.55; }
   .reply-trigger:hover { opacity: 1; }
 }
