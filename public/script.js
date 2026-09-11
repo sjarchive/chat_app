@@ -345,8 +345,15 @@ function renderAllMessages(data) {
 }
 
 // ---------- Settings (display name) ----------
+// The name here is the same one collected at signup, which lives in two
+// places: profiles.display_name (drives the labels) and the auth account's
+// user_metadata.display_name (stored with the login itself). Keep both in
+// sync so they can never disagree.
 function openSettings() {
-  settingsName.value = profileCache[currentUser?.id] || "";
+  settingsName.value =
+    profileCache[currentUser?.id] ||
+    currentUser?.user_metadata?.display_name ||
+    "";
   settingsError.textContent = "";
   settingsOverlay.classList.remove("hidden");
   settingsName.focus();
@@ -401,6 +408,16 @@ settingsSave.addEventListener("click", async () => {
     if (!data || data.length === 0) {
       throw new Error("Couldn't save your name. Try signing out and back in.");
     }
+
+    // Also update the name on the auth account itself, so it matches what was
+    // entered at signup and survives independently of the profiles row.
+    const { error: metaError } = await supabaseClient.auth.updateUser({
+      data: { display_name: name },
+    });
+    if (metaError) throw metaError;
+    // onAuthStateChange ignores this user's own USER_UPDATED event (it would
+    // otherwise re-run enterChat), so refresh the in-memory copy here.
+    if (currentUser.user_metadata) currentUser.user_metadata.display_name = name;
 
     profileCache[currentUser.id] = name;
     closeSettings();
