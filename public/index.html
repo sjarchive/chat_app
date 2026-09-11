@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<script>
+  // Apply the saved theme before first paint, so there's no flash of the wrong theme.
+  (function () {
+    try {
+      var t = localStorage.getItem("circle-theme") || "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
 <title>Circle</title>
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#0E1116" />
@@ -34,7 +43,14 @@
         <span class="chat-title">Circle</span>
         <span class="chat-sub" id="member-count">—</span>
       </div>
-      <button id="sign-out" class="icon-button" aria-label="Sign out">⏻</button>
+      <div class="header-actions">
+        <button type="button" id="theme-toggle" class="icon-button" aria-label="Toggle theme">
+          <svg id="theme-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
+        <button id="sign-out" class="icon-button" aria-label="Sign out">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        </button>
+      </div>
     </header>
 
     <main id="message-list" class="message-list"></main>
