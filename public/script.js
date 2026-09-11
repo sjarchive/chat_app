@@ -291,6 +291,7 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
     authScreen.classList.remove("hidden");
     chatsScreen.classList.add("hidden");
     chatScreen.classList.add("hidden");
+    setAppHeight();
   }
 });
 
@@ -351,6 +352,7 @@ function enterApp() {
   authScreen.classList.add("hidden");
   chatScreen.classList.add("hidden");
   chatsScreen.classList.remove("hidden");
+  setAppHeight();
   currentPartner = null;
   loadProfiles().then(() => {
     loadChatSummaries();
@@ -373,6 +375,7 @@ async function openConversation(partnerId) {
 
   chatsScreen.classList.add("hidden");
   chatScreen.classList.remove("hidden");
+  setAppHeight();
   cancelReply();
   hideComposerError();
   userSearch.value = "";
@@ -398,6 +401,7 @@ function closeConversation() {
 backButton.addEventListener("click", async () => {
   closeConversation();
   chatsScreen.classList.remove("hidden");
+  setAppHeight();
   await loadChatSummaries();
 });
 
