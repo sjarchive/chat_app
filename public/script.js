@@ -436,7 +436,18 @@ function renderMessage(msg) {
   replyBtn.className = "reply-trigger";
   replyBtn.setAttribute("aria-label", "Reply to this message");
   replyBtn.textContent = "↩";
-  replyBtn.addEventListener("click", () => startReply(msg));
+  replyBtn.addEventListener("click", () => {
+    // Restart the animation even on rapid re-clicks: removing the class,
+    // forcing reflow, then re-adding it makes the browser treat it as a
+    // fresh animation instead of a no-op (class already present).
+    row.classList.remove("reply-bounce");
+    void row.offsetWidth;
+    row.classList.add("reply-bounce");
+    startReply(msg);
+  });
+  row.addEventListener("animationend", (e) => {
+    if (e.animationName === "reply-bounce") row.classList.remove("reply-bounce");
+  });
 
   // Icon always follows the bubble so a left-swipe drags the bubble away
   // from it, not over it — avoids overlap on both mine and theirs rows.
