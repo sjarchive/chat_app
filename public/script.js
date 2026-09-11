@@ -445,3 +445,19 @@ async function subscribeToPush(registration, userId) {
   );
   if (error) console.error(error);
 }
+
+// ---------- Keep layout height accurate when the mobile keyboard opens/closes ----------
+function setAppHeight() {
+  const height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${height}px`);
+  // Keep the composer in view when the keyboard is open
+  if (document.activeElement === messageInput) {
+    scrollToBottom();
+  }
+}
+setAppHeight();
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", setAppHeight);
+} else {
+  window.addEventListener("resize", setAppHeight);
+}
