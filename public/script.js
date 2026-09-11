@@ -507,6 +507,11 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
     const reveal = Math.min(dragDistance, MAX_REVEAL);
     if (!mine) {
       bubble.style.transform = `translateX(${-reveal}px)`;
+      // The trigger sits right after the bubble in the DOM/flex flow, so its
+      // un-transformed position stays anchored where the bubble *used* to be
+      // even as the bubble itself slides left. Give it the same transform so
+      // it rides along with the bubble instead of just widening in place.
+      replyBtn.style.transform = `translateX(${-reveal}px)`;
     }
     replyBtn.style.width = reveal + "px";
     replyBtn.style.padding = (reveal * 0.15).toFixed(1) + "px"; // scales to 6px at MAX_REVEAL, same as the hover state
@@ -524,6 +529,8 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
     if (!mine) {
       bubble.style.transition = "transform 0.18s ease";
       bubble.style.transform = "translateX(0)";
+      replyBtn.style.transition += ", transform 0.18s ease";
+      replyBtn.style.transform = "translateX(0)";
     }
     if (swiping && dragDistance >= THRESHOLD) {
       startReply(msg);
