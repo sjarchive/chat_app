@@ -443,7 +443,7 @@ function renderMessage(msg) {
   row.appendChild(bubble);
   row.appendChild(replyBtn);
   messageList.appendChild(row);
-  attachSwipeToReply(row, replyBtn, msg);
+  attachSwipeToReply(row, bubble, replyBtn, msg, mine);
 
   lastRenderedSenderId = msg.sender_id;
   lastRowElement = row;
@@ -451,12 +451,19 @@ function renderMessage(msg) {
 }
 
 // ---------- Swipe-to-reply (mobile) ----------
-// Left-swiping a message bubble drags it and fades in the reply icon;
-// releasing past the threshold triggers the reply. On desktop the icon
-// is revealed on hover instead (see .msg-row:hover in style.css).
-function attachSwipeToReply(row, replyBtn, msg) {
+// Left-swiping a message bubble slides it left and fades in the reply
+// icon in the space that opens up; releasing past the threshold triggers
+// the reply. On desktop the icon is revealed on hover instead (see
+// .msg-row:hover in style.css).
+//
+// "mine" bubbles sit last in the row (anchored to the right edge), so
+// growing the icon's width already reflows the bubble left on its own —
+// no transform needed there. "theirs" bubbles sit first (anchored to the
+// left edge), so the reflow alone doesn't move them; those get an
+// explicit transform so they visibly slide too.
+function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
   const THRESHOLD = 56; // px of drag needed to trigger reply on release
-  const MAX_REVEAL = 40; // cap on how wide the icon opens up visually
+  const MAX_REVEAL = 40; // cap on how far the bubble slides / how wide the icon opens
   const SLOP = 8; // px of movement before we decide horizontal vs vertical
 
   let startX = 0;
@@ -472,6 +479,7 @@ function attachSwipeToReply(row, replyBtn, msg) {
     dragging = true;
     swiping = false;
     dragDistance = 0;
+    bubble.style.transition = "none";
     replyBtn.style.transition = "none";
   }, { passive: true });
 
@@ -491,11 +499,16 @@ function attachSwipeToReply(row, replyBtn, msg) {
       swiping = true;
     }
 
-    // Only left swipes reveal the icon. Growing its width (rather than
-    // transforming the bubble) makes the bubble reflow out of the way
-    // naturally, so it can never overlap the icon.
+    // Only left swipes reveal the icon. Its width growing opens real
+    // layout space right behind the bubble, so the two can never overlap.
+    // "mine" bubbles reflow left on their own as that space opens up;
+    // "theirs" bubbles need an explicit slide since they're anchored left.
     dragDistance = dx < 0 ? -dx : 0;
-    replyBtn.style.width = Math.min(dragDistance, MAX_REVEAL) + "px";
+    const reveal = Math.min(dragDistance, MAX_REVEAL);
+    if (!mine) {
+      bubble.style.transform = `translateX(${-reveal}px)`;
+    }
+    replyBtn.style.width = reveal + "px";
     replyBtn.style.opacity = Math.min(1, dragDistance / THRESHOLD).toFixed(2);
     e.preventDefault();
   }, { passive: false });
@@ -506,6 +519,10 @@ function attachSwipeToReply(row, replyBtn, msg) {
     replyBtn.style.transition = "width 0.18s ease, opacity 0.15s ease";
     replyBtn.style.width = "0px";
     replyBtn.style.opacity = "0";
+    if (!mine) {
+      bubble.style.transition = "transform 0.18s ease";
+      bubble.style.transform = "translateX(0)";
+    }
     if (swiping && dragDistance >= THRESHOLD) {
       startReply(msg);
     }
