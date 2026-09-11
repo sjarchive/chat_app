@@ -8,7 +8,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Show a notification when a push arrives
+// Show a notification when a push arrives — unless the chat is already
+// open and focused in this browser, since the message will already show
+// up live there via the realtime subscription.
 self.addEventListener("push", (event) => {
   let data = { title: "New message", body: "You have a new message in Circle" };
   try {
@@ -18,14 +20,22 @@ self.addEventListener("push", (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
-      tag: "circle-message",
-      renotify: true,
-      data: { url: "/" },
-    })
+    (async () => {
+      const windowClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const chatIsOpenAndFocused = windowClients.some(
+        (client) => client.focused && client.visibilityState === "visible"
+      );
+      if (chatIsOpenAndFocused) return;
+
+      await self.registration.showNotification(data.title, {
+        body: data.body,
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
+        tag: "circle-message",
+        renotify: true,
+        data: { url: "/" },
+      });
+    })()
   );
 });
 

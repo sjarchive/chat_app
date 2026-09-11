@@ -19,10 +19,17 @@ const jumpBottomCount = document.getElementById("jump-bottom-count");
 const typingIndicator = document.getElementById("typing-indicator");
 const themeToggle = document.getElementById("theme-toggle");
 const themeIcon = document.getElementById("theme-icon");
+const replyPreview = document.getElementById("reply-preview");
+const replyPreviewName = document.getElementById("reply-preview-name");
+const replyPreviewText = document.getElementById("reply-preview-text");
+const replyPreviewCancel = document.getElementById("reply-preview-cancel");
 
 let isSignUpMode = false;
 let currentUser = null;
 let profileCache = {}; // id -> {display_name}
+let messageCache = {}; // id -> full message row, so replies can show a quote
+let messageRowById = {}; // id -> rendered DOM row, so we can scroll to it
+let replyingTo = null; // the message object currently being replied to
 let lastRenderedSenderId = null;
 let lastRenderedDay = null;
 let lastRowElement = null;
@@ -140,8 +147,28 @@ authForm.addEventListener("submit", async (e) => {
 });
 
 signOutBtn.addEventListener("click", async () => {
+  await unsubscribeFromPush();
   await supabaseClient.auth.signOut();
 });
+
+// Stop this browser from receiving push notifications once the user logs out.
+// Without this, the push_subscriptions row (and the browser's own subscription)
+// stays active forever, so the server keeps sending notifications even though
+// nobody's logged in on this device anymore.
+async function unsubscribeFromPush() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe();
+    await supabaseClient.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  } catch (err) {
+    console.error(err);
+  }
+}
 
 // ---------- Session handling ----------
 supabaseClient.auth.onAuthStateChange((_event, session) => {
@@ -184,8 +211,23 @@ async function loadMessages() {
   lastRenderedSenderId = null;
   lastRenderedDay = null;
   lastRowElement = null;
+  messageRowById = {}; // old rows are gone, forget where they were
   data.forEach(renderMessage);
   scrollToBottom();
+}
+
+function truncate(str, n) {
+  return str.length > n ? str.slice(0, n - 1) + "…" : str;
+}
+
+// Scrolls to and briefly highlights a message that's already on screen
+// (used when tapping a quoted reply).
+function scrollToMessage(id) {
+  const row = messageRowById[id];
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("highlight-flash");
+  setTimeout(() => row.classList.remove("highlight-flash"), 1200);
 }
 
 // ---------- Realtime subscription ----------
@@ -308,6 +350,8 @@ function renderMessage(msg) {
   const mine = msg.sender_id === currentUser?.id;
   const msgDay = new Date(msg.created_at).toDateString();
 
+  messageCache[msg.id] = msg; // so any later reply to this message can quote it
+
   if (msgDay !== lastRenderedDay) {
     const divider = document.createElement("div");
     divider.className = "day-divider";
@@ -326,6 +370,7 @@ function renderMessage(msg) {
 
   const row = document.createElement("div");
   row.className = `msg-row ${mine ? "mine" : "theirs"} group-last ${isGrouped ? "grouped" : "group-start"}`;
+  row.dataset.msgId = msg.id;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
@@ -337,10 +382,33 @@ function renderMessage(msg) {
     bubble.appendChild(nameEl);
   }
 
+  // Quoted preview when this message is a reply to an earlier one
+  if (msg.reply_to) {
+    const quoted = document.createElement("div");
+    quoted.className = "quoted-msg";
+    const original = messageCache[msg.reply_to];
+    if (original) {
+      const qName = document.createElement("span");
+      qName.className = "quoted-name";
+      qName.textContent = original.sender_id === currentUser?.id ? "You" : profileCache[original.sender_id] || "Someone";
+      const qBody = document.createElement("span");
+      qBody.className = "quoted-body";
+      qBody.textContent = original.body ? truncate(original.body, 80) : original.media_path ? "📷 Photo" : "";
+      quoted.appendChild(qName);
+      quoted.appendChild(qBody);
+    } else {
+      quoted.textContent = "Original message";
+    }
+    quoted.addEventListener("click", () => scrollToMessage(msg.reply_to));
+    bubble.appendChild(quoted);
+  }
+
   if (msg.media_path) {
+    const mediaUrl = supabaseClient.storage.from("chat-media").getPublicUrl(msg.media_path).data.publicUrl;
     const img = document.createElement("img");
     img.className = "media";
-    img.src = supabaseClient.storage.from("chat-media").getPublicUrl(msg.media_path).data.publicUrl;
+    img.src = mediaUrl;
+    img.addEventListener("click", () => window.open(mediaUrl, "_blank", "noopener,noreferrer"));
     bubble.appendChild(img);
   }
 
@@ -363,12 +431,43 @@ function renderMessage(msg) {
   }
   bubble.appendChild(meta);
 
-  row.appendChild(bubble);
+  const replyBtn = document.createElement("button");
+  replyBtn.type = "button";
+  replyBtn.className = "reply-trigger";
+  replyBtn.setAttribute("aria-label", "Reply to this message");
+  replyBtn.textContent = "↩";
+  replyBtn.addEventListener("click", () => startReply(msg));
+
+  // Keep the reply icon on the outside edge, same side as the bubble
+  if (mine) {
+    row.appendChild(replyBtn);
+    row.appendChild(bubble);
+  } else {
+    row.appendChild(bubble);
+    row.appendChild(replyBtn);
+  }
   messageList.appendChild(row);
 
   lastRenderedSenderId = msg.sender_id;
   lastRowElement = row;
+  messageRowById[msg.id] = row;
 }
+
+// ---------- Reply-to ----------
+function startReply(msg) {
+  replyingTo = msg;
+  replyPreviewName.textContent = msg.sender_id === currentUser?.id ? "You" : profileCache[msg.sender_id] || "Someone";
+  replyPreviewText.textContent = msg.body ? truncate(msg.body, 80) : msg.media_path ? "📷 Photo" : "";
+  replyPreview.classList.remove("hidden");
+  messageInput.focus();
+}
+
+function cancelReply() {
+  replyingTo = null;
+  replyPreview.classList.add("hidden");
+}
+
+replyPreviewCancel.addEventListener("click", cancelReply);
 
 function isNearBottom() {
   return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 80;
@@ -411,8 +510,9 @@ composer.addEventListener("submit", async (e) => {
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, body: text });
+    .insert({ sender_id: currentUser.id, body: text, reply_to: replyingTo?.id || null });
   if (error) console.error(error);
+  cancelReply();
 });
 
 // ---------- Media attach ----------
@@ -436,8 +536,9 @@ attachInput.addEventListener("change", async () => {
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, media_path: path, media_type: file.type });
+    .insert({ sender_id: currentUser.id, media_path: path, media_type: file.type, reply_to: replyingTo?.id || null });
   if (error) console.error(error);
+  cancelReply();
 });
 
 // ---------- Service worker + push notifications ----------
