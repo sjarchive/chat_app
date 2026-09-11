@@ -197,24 +197,31 @@ html, body {
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  box-sizing: border-box;
   padding: 6px;
-  opacity: 0; /* hidden until revealed by hover (desktop) or swipe (mobile, via JS) */
+  width: 0; /* collapsed at rest — reserves no space, so bubbles stay flush to the edge */
+  overflow: hidden;
+  opacity: 0; /* revealed by hover (desktop) or swipe (mobile, via JS) */
   flex-shrink: 0;
-  position: relative;
-  z-index: 2; /* stay above the bubble even when it slides over during a swipe */
-  transition: opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent; /* no blue flash on tap/long-press */
+  transition: width 0.18s ease, opacity 0.15s ease;
 }
+.reply-trigger:focus { outline: none; }
+.reply-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Desktop / mouse: reveal on hover over the row, same as before */
+/* Desktop / mouse: reveal on hover over the row — the bubble reflows to make room */
 @media (hover: hover) and (pointer: fine) {
-  .msg-row:hover .reply-trigger { opacity: 0.55; }
+  .msg-row:hover .reply-trigger { width: 34px; opacity: 0.55; }
   .reply-trigger:hover { opacity: 1; }
 }
 
-/* Let JS own horizontal drag on the bubble while still allowing normal vertical scroll.
-   position+z-index keeps it below the reply icon so a leftward drag on "mine" rows
-   (where the icon sits before the bubble in the DOM) doesn't paint over the icon. */
-.bubble { touch-action: pan-y; position: relative; z-index: 1; }
+/* Touch devices: no hover affordance, so make the tap target bigger */
+@media (hover: none) and (pointer: coarse) {
+  .reply-trigger { font-size: 26px; }
+}
+
+/* Let JS own horizontal swipe gestures while still allowing normal vertical scroll. */
+.bubble { touch-action: pan-y; }
 
 .quoted-msg {
   display: flex;
