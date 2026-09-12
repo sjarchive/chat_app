@@ -25,8 +25,8 @@ const signOutBtn = document.getElementById("sign-out");
 const jumpBottom = document.getElementById("jump-bottom");
 const jumpBottomCount = document.getElementById("jump-bottom-count");
 const typingIndicator = document.getElementById("typing-indicator");
-const themeToggles = [document.getElementById("theme-toggle"), document.getElementById("theme-toggle-chat")];
-const themeIcons = [document.getElementById("theme-icon"), document.getElementById("theme-icon-chat")];
+const themeToggle = document.getElementById("theme-toggle");
+const themeIcon = document.getElementById("theme-icon");
 const replyPreview = document.getElementById("reply-preview");
 const replyPreviewName = document.getElementById("reply-preview-name");
 const replyPreviewText = document.getElementById("reply-preview-text");
@@ -62,13 +62,10 @@ const MOON_ICON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
 
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  themeIcons.forEach((icon) => {
-    if (icon) icon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
-  });
-  themeToggles.forEach((toggle) => {
-    if (!toggle) return;
-    toggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
-  });
+  if (themeIcon) themeIcon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
+  if (themeToggle) {
+    themeToggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+  }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme === "light" ? "#ECE5DD" : "#0E1116");
   try {
@@ -78,14 +75,12 @@ function applyTheme(theme) {
 
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 
-themeToggles.forEach((toggle) => {
-  if (toggle) {
-    toggle.addEventListener("click", () => {
-      const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-      applyTheme(current === "light" ? "dark" : "light");
-    });
-  }
-});
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    applyTheme(current === "light" ? "dark" : "light");
+  });
+}
 
 // ---------- Auth mode toggle ----------
 function resetAuthFields() {
