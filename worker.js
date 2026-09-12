@@ -55,12 +55,17 @@ async function handleNotify(request, env) {
     privateKey: env.VAPID_PRIVATE_KEY,
   };
 
-  const notificationBody = message.media_path
-    ? `${senderName} sent a photo`
-    : `${senderName}: ${message.body || ""}`;
-
+  // End-to-end encrypted: the sender's client stored an encrypted preview in
+  // messages.notify; this server can't read it — sw.js decrypts it on the
+  // recipient's device. Rows without one (sent before E2EE, or to a user who
+  // hasn't logged in since) get generic text with the sender's name, which
+  // is public metadata in profiles anyway.
   const pushMessage = {
-    data: JSON.stringify({ title: "Circle", body: notificationBody }),
+    data: JSON.stringify({
+      title: "Circle",
+      enc: message.notify || null,
+      from: senderName,
+    }),
     options: { ttl: 60 },
   };
 
