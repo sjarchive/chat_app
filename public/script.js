@@ -82,7 +82,10 @@ let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
 let currentPartner = null; // the other user in the open conversation
 let chatSummaries = {}; // partnerId -> { last: message row, unread: count }
-let realtimeSubscribed = false; // realtime/profiles channels open only once per page load
+let messagesChannel = null; // live INSERT/UPDATE/DELETE subscription for messages
+let profilesChannel = null; // live UPDATE/DELETE subscription for profiles
+let messagesChannelSince = 0; // when each channel was (re)built, for stuck-join detection
+let profilesChannelSince = 0;
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -346,27 +349,34 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
     currentUser = session.user;
     enterApp();
   } else {
-    currentUser = null;
-    currentPartner = null;
-    closeConversation();
-    // Sign-out removed this user's push subscription rows, so allow
-    // subscribeToPush to run again if they sign back in this session.
-    pushSubscribedForUser = null;
-    document.documentElement.classList.remove("has-session");
-    showEl(authScreen);
-    hideEl(chatsScreen);
-    hideEl(chatScreen);
-    setAppHeight();
+    resetToAuthScreen();
   }
 });
+
+// Tears everything user-specific down and lands back on the login form.
+// Shared by real sign-outs and by "this account was deleted server-side"
+// (handleProfileDeleted), which needs the exact same reset.
+function resetToAuthScreen() {
+  currentUser = null;
+  currentPartner = null;
+  closeConversation();
+  // Sign-out removed this user's push subscription rows, so allow
+  // subscribeToPush to run again if they sign back in this session.
+  pushSubscribedForUser = null;
+  document.documentElement.classList.remove("has-session");
+  showEl(authScreen);
+  hideEl(chatsScreen);
+  hideEl(chatScreen);
+  setAppHeight();
+}
 
 // ---------- Live profile updates ----------
 // Someone renaming themselves in Settings should show up in everyone's open
 // tab immediately: update the cache and patch the DOM in place (name labels,
 // quoted replies, typing indicator) rather than re-rendering the whole list,
 // which would reset scroll position for other viewers.
-function subscribeProfiles() {
-  supabaseClient
+function buildProfilesChannel() {
+  const channel = supabaseClient
     .channel("public:profiles")
     .on(
       "postgres_changes",
@@ -410,7 +420,46 @@ function subscribeProfiles() {
         }
       }
     )
+    // A profiles row vanishing means that account was deleted server-side
+    // (admin action in the Supabase dashboard) — react to it live.
+    .on(
+      "postgres_changes",
+      { event: "DELETE", schema: "public", table: "profiles" },
+      (payload) => handleProfileDeleted(payload.old?.id)
+    )
     .subscribe();
+  return channel;
+}
+
+// Someone was deleted from Supabase auth. For everyone else this removes
+// their name, chat entries and any open conversation with them on the spot;
+// for the deleted account's own tab (its JWT is still valid, so realtime
+// still delivers the event) it forces an immediate logout.
+async function handleProfileDeleted(id) {
+  if (!id || !currentUser) return;
+
+  if (id === currentUser.id) {
+    // The push rows can still be removed while the orphaned session's JWT is
+    // valid; then sign out — the SIGNED_OUT event runs resetToAuthScreen().
+    await unsubscribeFromPush();
+    await supabaseClient.auth.signOut();
+    // Belt: reset even if no SIGNED_OUT event came back (idempotent if it did).
+    if (currentUser) resetToAuthScreen();
+    return;
+  }
+
+  clearTyping(id);
+  delete profileCache[id];
+  delete chatSummaries[id];
+
+  if (currentPartner === id) {
+    // Standing in a conversation whose other side no longer exists — kick
+    // back to the chats list (replaceState so back can't re-enter it).
+    try { history.replaceState(null, ""); } catch (e) {}
+    goBackToChats();
+    return;
+  }
+  if (!chatsScreen.classList.contains("hidden")) renderChatList();
 }
 
 function enterApp() {
@@ -432,15 +481,11 @@ function enterApp() {
   const savedPartner = getStoredOpenChat();
 
   loadProfiles().then(() => {
-    // Sign out and back in within the same tab re-runs enterApp; without this
-    // guard each pass would open another realtime/profiles channel with the
-    // same name, so every message event (and theme toggle repaint) would be
-    // processed — and rendered — multiple times.
-    if (!realtimeSubscribed) {
-      realtimeSubscribed = true;
-      subscribeRealtime();
-      subscribeProfiles();
-    }
+    // ensureRealtime() is idempotent: sign out/back in within this tab, tab
+    // refocuses and the periodic sync all reuse healthy channels instead of
+    // stacking duplicates (each duplicate would process — and render — every
+    // message event multiple times).
+    ensureRealtime();
     if (savedPartner) {
       chatsScreen.classList.add("hidden");
       loadChatSummaries();
@@ -616,11 +661,22 @@ function timeLabel(iso) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// Rebuilding the list resets its scroll position and tap/hover states, so
+// skip the work when nothing visible changed — the periodic background
+// re-sync runs this often on a healthy client, where it's a pure no-op.
+let lastChatListSignature = null;
+
 function renderChatList() {
-  chatList.innerHTML = "";
   const partners = Object.keys(chatSummaries).sort(
     (a, b) => new Date(chatSummaries[b].last.created_at) - new Date(chatSummaries[a].last.created_at)
   );
+  const signature = partners
+    .map((p) => `${p}:${chatSummaries[p].last?.id}:${chatSummaries[p].unread}:${profileCache[p] ?? ""}`)
+    .join("|");
+  if (signature === lastChatListSignature) return;
+  lastChatListSignature = signature;
+
+  chatList.innerHTML = "";
 
   if (partners.length === 0) {
     const empty = document.createElement("div");
@@ -694,6 +750,13 @@ function updateChatSummaryFor(msg) {
   const s = (chatSummaries[partner] ||= { last: null, unread: 0 });
   if (!s.last || new Date(msg.created_at) >= new Date(s.last.created_at)) s.last = msg;
   if (msg.recipient_id === currentUser.id && !msg.seen_at && currentPartner !== partner) s.unread++;
+  // A brand-new contact's first message would otherwise sit as "Someone"
+  // until the next full reload — pull the name and repaint the row with it.
+  if (!profileCache[partner]) {
+    ensureProfileCached(partner).then(() => {
+      if (!chatsScreen.classList.contains("hidden")) renderChatList();
+    });
+  }
   if (!chatsScreen.classList.contains("hidden")) renderChatList();
 }
 
@@ -1024,8 +1087,8 @@ async function ensureProfileCached(id) {
   return data.display_name;
 }
 
-function subscribeRealtime() {
-  supabaseClient
+function buildMessagesChannel() {
+  const channel = supabaseClient
     .channel("public:messages")
     .on(
       "postgres_changes",
@@ -1056,7 +1119,74 @@ function subscribeRealtime() {
         if (msg.sender_id === currentUser.id) updateChatSummaryFor(msg);
       }
     )
+    // Rows deleted server-side (the admin deleted the other participant and
+    // a DB trigger wiped the whole conversation): drop them from the open
+    // chat in place and refresh any chat-list preview that pointed at one.
+    .on(
+      "postgres_changes",
+      { event: "DELETE", schema: "public", table: "messages" },
+      (payload) => {
+        const id = payload.old?.id;
+        if (!id) return;
+        const row = messageRowById[id];
+        if (row) {
+          if (lastRowElement === row) lastRowElement = null;
+          row.remove();
+        }
+        delete messageRowById[id];
+        delete messageCache[id];
+        for (const partner of Object.keys(chatSummaries)) {
+          if (chatSummaries[partner].last && chatSummaries[partner].last.id === id) {
+            resyncChatSummariesSoon();
+            break;
+          }
+        }
+      }
+    )
     .subscribe();
+  return channel;
+}
+
+// Keeps both live channels up. A websocket that silently died while the tab
+// was suspended (phones especially) sits in an errored/closed state forever
+// otherwise — push notifications keep arriving over their separate server
+// path, but the UI would stay stale until a manual refresh. A healthy
+// "joined" channel is left untouched; sign out/in within the tab reuses it
+// (supabase-js feeds the current token to the socket on every auth change).
+function channelIsDead(channel, since) {
+  if (!channel) return false;
+  if (channel.state === "errored" || channel.state === "closed") return true;
+  // Stuck mid-join for 10s+ (join timeout is 10s) counts as dead too, or a
+  // channel that never completes its handshake would never be rebuilt.
+  return channel.state !== "joined" && Date.now() - since > 10000;
+}
+
+function ensureRealtime() {
+  if (channelIsDead(messagesChannel, messagesChannelSince)) {
+    supabaseClient.removeChannel(messagesChannel).catch(() => {});
+    messagesChannel = null;
+  }
+  if (channelIsDead(profilesChannel, profilesChannelSince)) {
+    supabaseClient.removeChannel(profilesChannel).catch(() => {});
+    profilesChannel = null;
+  }
+  if (!messagesChannel) {
+    messagesChannel = buildMessagesChannel();
+    messagesChannelSince = Date.now();
+  }
+  if (!profilesChannel) {
+    profilesChannel = buildProfilesChannel();
+    profilesChannelSince = Date.now();
+  }
+}
+
+// Coalesces bursts of message DELETEs (a whole conversation wiped at once)
+// into a single summaries refresh.
+let summaryResyncTimer = null;
+
+function resyncChatSummariesSoon() {
+  clearTimeout(summaryResyncTimer);
+  summaryResyncTimer = setTimeout(loadChatSummaries, 150);
 }
 
 function handleIncomingMessage(msg) {
@@ -1554,8 +1684,40 @@ document.addEventListener("visibilitychange", () => {
     // Messages that arrived while the tab was hidden (so weren't marked
     // seen) get read now that the user is actually looking at the chat.
     if (currentPartner) markConversationSeen();
+    // The realtime socket may not have survived the tab being suspended:
+    // rebuild dead channels and re-sync the list instead of sitting stale.
+    if (currentUser) {
+      ensureRealtime();
+      loadChatSummaries();
+    }
   }
 });
+
+// ---------- Periodic background sync ----------
+// Safety net under realtime, running only while the tab is visible:
+// - rebuild any dead realtime channel (ensureRealtime),
+// - re-fetch chat summaries so nothing the websocket missed stays hidden
+//   longer than one interval,
+// - re-check that this account still exists server-side, so a user deleted
+//   from Supabase auth gets logged out even if the realtime DELETE event
+//   was missed while the channel was down.
+setInterval(() => {
+  if (!currentUser || document.visibilityState !== "visible") return;
+  ensureRealtime();
+  verifyAccountExists();
+  loadChatSummaries();
+}, 30000);
+
+async function verifyAccountExists() {
+  if (!currentUser) return;
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id")
+    .eq("id", currentUser.id)
+    .maybeSingle();
+  // Only a definite "no row" logs out — a network/permission error must not.
+  if (!error && !data) handleProfileDeleted(currentUser.id);
+}
 
 // ---------- Composer errors ----------
 // Failed sends/uploads are otherwise silent (the input is already cleared by
