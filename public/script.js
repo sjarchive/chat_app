@@ -469,6 +469,7 @@ async function loadChatSummaries() {
   const { data, error } = await supabaseClient
     .from("messages")
     .select("id, sender_id, recipient_id, body, media_path, created_at, seen_at")
+    .or(`sender_id.eq.${currentUser.id},recipient_id.eq.${currentUser.id}`)
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) return console.error(error);
