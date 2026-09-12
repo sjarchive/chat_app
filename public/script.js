@@ -385,6 +385,10 @@ async function openConversation(partnerId) {
   chatsScreen.classList.add("hidden");
   chatScreen.classList.remove("hidden");
   setAppHeight();
+  // Clear out the previous conversation's messages immediately, rather than
+  // leaving them on screen until loadMessages()'s fetch resolves — otherwise
+  // there's a visible flash of stale content right after the screen switches.
+  clearMessageList();
   cancelReply();
   hideComposerError();
   userSearch.value = "";
@@ -617,12 +621,16 @@ async function loadMessages() {
 }
 
 function renderAllMessages(data) {
+  clearMessageList();
+  data.forEach(renderMessage);
+}
+
+function clearMessageList() {
   messageList.innerHTML = "";
   lastRenderedSenderId = null;
   lastRenderedDay = null;
   lastRowElement = null;
   messageRowById = {}; // old rows are gone, forget where they were
-  data.forEach(renderMessage);
 }
 
 // ---------- Settings (display name) ----------
