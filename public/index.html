@@ -90,6 +90,40 @@ html, body {
   font-size: 16.5px;
 }
 
+/* ---------- Text selection policy ----------
+   Selection is disabled sitewide: on touch devices an accidental
+   touch-and-hold (or a finger that drifts a few px while tapping) makes the
+   browser run its selection drag and flash a blue highlight over headers,
+   list rows, buttons, etc. Setting it on <html> covers every descendant,
+   because user-select:auto (the default) resolves to the parent's used
+   value. Elements below opt back in explicitly. -webkit-touch-callout:none
+   also suppresses the iOS long-press callout sheet outside the chat. */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Form controls must stay fully editable/selectable — on iOS an inherited
+   user-select:none can otherwise make an input impossible to type into. */
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+/* Message text stays selectable so users can hold/copy important info.
+   The .meta row (time + ticks) opts back out so a selection that starts on
+   the message text doesn't swallow the timestamp. */
+.bubble {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.bubble .meta {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* Slim, unobtrusive scrollbars (Telegram-style) */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.35); border-radius: 3px; }
