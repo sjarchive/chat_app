@@ -41,14 +41,6 @@ const composerError = document.getElementById("composer-error");
 
 let isSignUpMode = false;
 
-// Stale "return to photo" state from a previous page visit must never
-// survive into a fresh load: loadMessages always opens at the newest
-// message, and nothing left over may pull the viewport back into history.
-// (bfcache restores don't re-run scripts, so this only fires on real loads.)
-try {
-  sessionStorage.removeItem("circle-return-message-id");
-  sessionStorage.removeItem("circle-return-scroll-top");
-} catch (e) {}
 let currentUser = null;
 let profileCache = {}; // id -> display_name (usernames are looked up ad-hoc for search)
 let messageCache = {}; // id -> full message row, so replies can show a quote
@@ -474,13 +466,6 @@ function closeConversation() {
   chatScreen.classList.add("hidden");
   currentPartner = null;
   clearStoredOpenChat();
-  // Any pending "return to this photo's message" request belonged to the
-  // conversation we're now leaving — drop it so it can never reposition a
-  // different chat opened later. See restoreReturnMessagePosition().
-  try {
-    sessionStorage.removeItem("circle-return-message-id");
-    sessionStorage.removeItem("circle-return-scroll-top");
-  } catch (e) {}
 }
 
 async function goBackToChats() {
@@ -1130,15 +1115,6 @@ function renderMessage(msg) {
       img.src = mediaUrl;
       img.alt = "Photo";
       img.addEventListener("click", () => {
-        // Remember exactly which message opened the external file, so coming
-        // back to this tab (bfcache / tab switch, no reload) can restore the
-        // viewport to this message. Cleared on every fresh page load — see
-        // the wipe near the top of this file — so it can never leak into a
-        // reload and reposition the chat to some old spot in history.
-        try {
-          sessionStorage.setItem("circle-return-message-id", String(msg.id));
-          sessionStorage.setItem("circle-return-scroll-top", String(messageList.scrollTop));
-        } catch (e) {}
         window.open(mediaUrl, "_blank", "noopener,noreferrer");
       });
       bubble.appendChild(img);
@@ -1383,55 +1359,13 @@ jumpBottom.addEventListener("click", () => {
 });
 
 
-// Returning from an opened photo should put the viewport back where it was —
-// but ONLY when the page itself never reloaded (bfcache restore or tab
-// switch): the return state is wiped on every fresh load, and loadMessages
-// always lands on the newest message, so this can never reposition a
-// freshly opened chat.
-function restoreReturnMessagePosition() {
-  // Read-and-clear happens unconditionally, before any early return, so a
-  // saved position from a photo tap never survives past this call — even if
-  // we're currently sitting on the chats list (no currentPartner) when the
-  // tab refocuses. Otherwise it lingers in sessionStorage and gets applied
-  // to whatever unrelated conversation happens to be open next time a
-  // visibility/pageshow event fires, jumping the viewport to a stale
-  // message the user never asked to return to.
-  let id, savedTop;
-  try {
-    id = sessionStorage.getItem("circle-return-message-id");
-    const top = sessionStorage.getItem("circle-return-scroll-top");
-    savedTop = top === null ? null : Number(top);
-    sessionStorage.removeItem("circle-return-message-id");
-    sessionStorage.removeItem("circle-return-scroll-top");
-  } catch (e) {
-    return;
-  }
-  if (!id || !currentPartner) return;
-
-  const row = messageRowById[id];
-  if (!row) return;
-  if (Number.isFinite(savedTop)) {
-    messageList.scrollTop = Math.max(0, Math.min(savedTop, messageList.scrollHeight));
-  }
-  // If the saved offset no longer shows the message (layout changed while
-  // away), center the message rather than landing somewhere random.
-  const rect = row.getBoundingClientRect();
-  const listRect = messageList.getBoundingClientRect();
-  if (!(rect.bottom > listRect.top && rect.top < listRect.bottom)) {
-    scrollToMessage(id, "auto");
-  }
-}
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    restoreReturnMessagePosition();
     // Messages that arrived while the tab was hidden (so weren't marked
     // seen) get read now that the user is actually looking at the chat.
     if (currentPartner) markConversationSeen();
   }
 });
-
-window.addEventListener("pageshow", restoreReturnMessagePosition);
 
 // ---------- Composer errors ----------
 // Failed sends/uploads are otherwise silent (the input is already cleared by
