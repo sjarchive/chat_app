@@ -38,7 +38,14 @@
      cached file), which shows the bare unstyled HTML for a split second.
      With the CSS inside the document, the first paint is always styled. -->
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Suppresses the default mobile blue/gray tap-highlight box that Chrome
+     and Safari flash on any tappable element when it's tapped. */
+  -webkit-tap-highlight-color: transparent;
+}
 
 :root {
   --bg: #0E1116;
