@@ -284,6 +284,53 @@ input, textarea {
 .icon-button:active { background: rgba(127,127,127,0.2); }
 .icon-button svg { display: block; }
 
+/* Snappier hover feedback: the universal theme cross-fade rule at the top of
+   the stylesheet also transitions background-color over 0.3s, which made the
+   small icon buttons' hover highlight fade in/out slowly enough to feel
+   laggy. Keep the slow theme fade for border-color, speed up the rest. */
+.icon-button {
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.3s ease;
+}
+
+/* ---------- Custom hover tooltips (icon buttons) ----------
+   Native title= tooltips are replaced by a styled ::after bubble: rounded,
+   theme-aware, appearing a short grace period after the cursor settles so
+   sweeping across the header buttons doesn't pop a tooltip for every button
+   merely passed over (that, plus the slow hover fade above, is what read as
+   "stuttery"). background/border/color are re-listed so this rule's
+   transition doesn't drop the theme cross-fade the universal rule provides. */
+.icon-button[data-tip] { position: relative; }
+.icon-button[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-3px);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 30;
+  transition: opacity 0.15s ease, transform 0.15s ease,
+              background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+.icon-button[data-tip]:hover::after,
+.icon-button[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  /* The grace period: hover-in waits ~half a second; hover-out uses the base
+     rule's 0 delay, so the bubble leaves as soon as the cursor moves on. */
+  transition-delay: 0.45s, 0.45s, 0s, 0s, 0s;
+}
+
 .message-list {
   flex: 1;
   overflow-y: auto;
@@ -909,13 +956,13 @@ input, textarea {
         <span class="chat-title">Chats</span>
       </div>
       <div class="header-actions">
-        <button type="button" id="settings-button" class="icon-button" aria-label="Profile" title="Profile">
+        <button type="button" id="settings-button" class="icon-button" aria-label="Profile" data-tip="Profile">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </button>
-        <button type="button" id="theme-toggle" class="icon-button" aria-label="Toggle theme" title="Switch theme">
+        <button type="button" id="theme-toggle" class="icon-button" aria-label="Toggle theme" data-tip="Switch theme">
           <svg id="theme-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
         </button>
-        <button id="sign-out" class="icon-button" aria-label="Sign out" title="Sign out">
+        <button id="sign-out" class="icon-button" aria-label="Sign out" data-tip="Sign out">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
         </button>
       </div>
@@ -932,7 +979,7 @@ input, textarea {
   <!-- CHAT SCREEN -->
   <div id="chat-screen" class="screen hidden">
     <header class="chat-header">
-      <button type="button" id="back-button" class="icon-button" aria-label="Back to chats" title="Back to chats">
+      <button type="button" id="back-button" class="icon-button" aria-label="Back to chats" data-tip="Back to chats">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <div class="chat-header-info">

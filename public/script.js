@@ -97,8 +97,9 @@ function applyTheme(theme) {
   if (themeIcon) themeIcon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
   if (themeToggle) {
     themeToggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
-    // Hover tooltip mirrors the aria-label, which flips with the current theme
-    themeToggle.title = themeToggle.getAttribute("aria-label");
+    // Custom hover tooltip (styled ::after bubble) mirrors the aria-label,
+    // which flips with the current theme
+    themeToggle.dataset.tip = theme === "light" ? "Switch to dark theme" : "Switch to light theme";
   }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme === "light" ? "#ECE5DD" : "#0E1116");
