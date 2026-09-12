@@ -696,14 +696,19 @@ chatsScreen.addEventListener("click", (e) => {
 
 // ---------- Load message history (current conversation) ----------
 async function loadMessages() {
+  // Order newest-first so limit(200) keeps the most recent 200 messages,
+  // then reverse back to oldest-first for rendering. Ordering ascending
+  // before the limit (the old behavior) kept the OLDEST 200 messages in any
+  // conversation past that size, silently dropping every recent message and
+  // leaving the view scrolled to the bottom of a stale batch.
   const { data, error } = await supabaseClient
     .from("messages")
     .select("*")
     .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${currentPartner}),and(sender_id.eq.${currentPartner},recipient_id.eq.${currentUser.id})`)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(200);
   if (error) return console.error(error);
-  renderAllMessages(data);
+  renderAllMessages(data.reverse());
 
   // Always open the conversation at the newest message. scrollTop is set
   // directly (no smooth scroll), so the latest message is simply what's on
@@ -841,11 +846,11 @@ async function refreshMessageNames() {
     .from("messages")
     .select("*")
     .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${currentPartner}),and(sender_id.eq.${currentPartner},recipient_id.eq.${currentUser.id})`)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(200);
   if (error) return console.error(error);
   const scrollTop = messageList.scrollTop;
-  renderAllMessages(data);
+  renderAllMessages(data.reverse());
   messageList.scrollTop = Math.min(scrollTop, messageList.scrollHeight);
 }
 
