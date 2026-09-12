@@ -474,6 +474,13 @@ function closeConversation() {
   chatScreen.classList.add("hidden");
   currentPartner = null;
   clearStoredOpenChat();
+  // Any pending "return to this photo's message" request belonged to the
+  // conversation we're now leaving — drop it so it can never reposition a
+  // different chat opened later. See restoreReturnMessagePosition().
+  try {
+    sessionStorage.removeItem("circle-return-message-id");
+    sessionStorage.removeItem("circle-return-scroll-top");
+  } catch (e) {}
 }
 
 async function goBackToChats() {
@@ -1382,18 +1389,24 @@ jumpBottom.addEventListener("click", () => {
 // always lands on the newest message, so this can never reposition a
 // freshly opened chat.
 function restoreReturnMessagePosition() {
-  if (!currentPartner) return;
+  // Read-and-clear happens unconditionally, before any early return, so a
+  // saved position from a photo tap never survives past this call — even if
+  // we're currently sitting on the chats list (no currentPartner) when the
+  // tab refocuses. Otherwise it lingers in sessionStorage and gets applied
+  // to whatever unrelated conversation happens to be open next time a
+  // visibility/pageshow event fires, jumping the viewport to a stale
+  // message the user never asked to return to.
   let id, savedTop;
   try {
     id = sessionStorage.getItem("circle-return-message-id");
     const top = sessionStorage.getItem("circle-return-scroll-top");
     savedTop = top === null ? null : Number(top);
+    sessionStorage.removeItem("circle-return-message-id");
+    sessionStorage.removeItem("circle-return-scroll-top");
   } catch (e) {
     return;
   }
-  if (!id) return;
-  sessionStorage.removeItem("circle-return-message-id");
-  sessionStorage.removeItem("circle-return-scroll-top");
+  if (!id || !currentPartner) return;
 
   const row = messageRowById[id];
   if (!row) return;
