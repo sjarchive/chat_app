@@ -803,6 +803,11 @@ let suppressEntryAnimation = false;
 
 function clearMessageList() {
   messageList.innerHTML = "";
+  // innerHTML = "" above also removes #jump-bottom, which lives inside this
+  // list. Its element references (and listeners) would then point at a
+  // detached node, so the scroll-up button would never appear again after
+  // opening a chat. Re-attach it so it keeps working.
+  messageList.appendChild(jumpBottom);
   lastRenderedSenderId = null;
   lastRenderedDay = null;
   lastRowElement = null;
