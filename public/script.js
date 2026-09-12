@@ -40,6 +40,15 @@ const settingsCancel = document.getElementById("settings-cancel");
 const composerError = document.getElementById("composer-error");
 
 let isSignUpMode = false;
+
+// Stale "return to photo" state from a previous page visit must never
+// survive into a fresh load: loadMessages always opens at the newest
+// message, and nothing left over may pull the viewport back into history.
+// (bfcache restores don't re-run scripts, so this only fires on real loads.)
+try {
+  sessionStorage.removeItem("circle-return-message-id");
+  sessionStorage.removeItem("circle-return-scroll-top");
+} catch (e) {}
 let currentUser = null;
 let profileCache = {}; // id -> display_name (usernames are looked up ad-hoc for search)
 let messageCache = {}; // id -> full message row, so replies can show a quote
@@ -51,8 +60,6 @@ let lastRowElement = null;
 let unseenWhileScrolledUp = 0;
 let typingTimers = {}; // user_id -> timeout handle
 let typingChannel = null;
-let pendingRestoreMessageId = null;
-let pendingRestoreScrollTop = null;
 let currentPartner = null; // the other user in the open conversation
 let chatSummaries = {}; // partnerId -> { last: message row, unread: count }
 let realtimeSubscribed = false; // realtime/profiles channels open only once per page load
@@ -412,31 +419,6 @@ function clearStoredOpenChat() {
   } catch (e) {}
 }
 
-// ---------- Remember each conversation's last scroll position ----------
-// Reopening a chat (or refreshing while inside it) should land exactly where
-// the user left it, not at the newest message and not at some arbitrary spot.
-// "bottom" is stored as a sentinel rather than a pixel offset, because pixel
-// offsets drift as new messages/images change the list height — near-bottom
-// always means "show the latest".
-function savedScrollKey(partnerId) {
-  return `circle-chat-scroll:${partnerId}`;
-}
-
-function getSavedScroll(partnerId) {
-  try {
-    const v = sessionStorage.getItem(savedScrollKey(partnerId));
-    return v === null ? null : v;
-  } catch (e) {
-    return null;
-  }
-}
-
-function saveScrollPosition(partnerId, top, nearBottom) {
-  try {
-    sessionStorage.setItem(savedScrollKey(partnerId), nearBottom ? "bottom" : String(top));
-  } catch (e) {}
-}
-
 // ---------- Conversation navigation ----------
 async function openConversation(partnerId) {
   currentPartner = partnerId;
@@ -694,57 +676,19 @@ async function loadMessages() {
   if (error) return console.error(error);
   renderAllMessages(data);
 
-  // Normally open the chat where the user last left it (or the newest
-  // message if they were at the bottom). If the user just opened a file from
-  // an older message, restore that exact message instead.
-  const returnState = getReturnState();
-  pendingRestoreMessageId = returnState.id;
-  pendingRestoreScrollTop = returnState.scrollTop;
-  if (!restoreReturnMessagePosition()) {
-    const saved = getSavedScroll(currentPartner);
-    applyInitialScroll(saved !== null && saved !== "bottom" ? Number(saved) : "bottom");
-  }
+  // Always open the conversation at the newest message. scrollTop is set
+  // directly (no smooth scroll), so the latest message is simply what's on
+  // screen from the first paint.
+  scrollToBottom();
+  // Images and content-visibility placeholders resolving a few frames later
+  // can change the scroll height and nudge the viewport off the bottom;
+  // re-assert it briefly. isNearBottom() guards this so a user who scrolled
+  // up immediately is never dragged back down.
+  requestAnimationFrame(() => { if (isNearBottom()) scrollToBottom(); });
+  setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 100);
+  setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 300);
   updateJumpBottom();
 }
-
-// Scrolls the freshly opened chat to its target position, then re-asserts it
-// over the next few hundred milliseconds. The re-assertion is the important
-// part: off-screen message rows (content-visibility) initially lay out at an
-// estimated height and only adopt their real height once rendered, so the
-// list's scrollHeight keeps shifting right after the jump — a single
-// scrollTop assignment lands at a seemingly random spot in history. Re-applying
-// after each settling pass keeps the viewport pinned until layout is stable.
-// Any real user scroll input cancels the re-assertion so it never fights the
-// reader.
-let initialScrollCancelled = false;
-
-function applyInitialScroll(target) {
-  initialScrollCancelled = false;
-  const apply = () => {
-    if (initialScrollCancelled) return;
-    if (target === "bottom") {
-      scrollToBottom();
-    } else {
-      messageList.scrollTop = target;
-      updateJumpBottom();
-    }
-  };
-  apply();
-  requestAnimationFrame(apply);
-  setTimeout(apply, 150);
-  setTimeout(apply, 400);
-  setTimeout(apply, 700);
-}
-
-["wheel", "touchstart", "keydown"].forEach((ev) => {
-  messageList.addEventListener(
-    ev,
-    () => {
-      initialScrollCancelled = true;
-    },
-    { passive: true }
-  );
-});
 
 function renderAllMessages(data) {
   // Batch render of existing history: no per-row entry animation (see the
@@ -888,54 +832,6 @@ function scrollToMessage(id, behavior = "smooth") {
   row.scrollIntoView({ behavior, block: "center" });
   row.classList.add("highlight-flash");
   setTimeout(() => row.classList.remove("highlight-flash"), 1200);
-  return true;
-}
-
-function getReturnState() {
-  try {
-    const id = sessionStorage.getItem("circle-return-message-id");
-    const top = sessionStorage.getItem("circle-return-scroll-top");
-    return {
-      id: id || null,
-      scrollTop: top === null ? null : Number(top),
-    };
-  } catch (e) {
-    return { id: null, scrollTop: null };
-  }
-}
-
-function clearReturnState() {
-  try {
-    sessionStorage.removeItem("circle-return-message-id");
-    sessionStorage.removeItem("circle-return-scroll-top");
-  } catch (e) {}
-}
-
-function restoreReturnMessagePosition() {
-  const state = getReturnState();
-  const id = pendingRestoreMessageId || state.id;
-  const savedTop = pendingRestoreScrollTop ?? state.scrollTop;
-  if (!id || !messageRowById[id]) return false;
-
-  // Restore the exact scroll position first. This keeps the clicked file
-  // message in roughly the same place even if the browser changed the
-  // scroll position while switching tabs.
-  if (Number.isFinite(savedTop)) {
-    messageList.scrollTop = Math.max(0, Math.min(savedTop, messageList.scrollHeight));
-  }
-
-  const row = messageRowById[id];
-  const rect = row.getBoundingClientRect();
-  const listRect = messageList.getBoundingClientRect();
-  const isVisible = rect.bottom > listRect.top && rect.top < listRect.bottom;
-
-  // If the exact position is no longer valid after layout changes, center
-  // the original message rather than jumping to the latest message.
-  if (!isVisible) scrollToMessage(id, "auto");
-
-  pendingRestoreMessageId = null;
-  pendingRestoreScrollTop = null;
-  clearReturnState();
   return true;
 }
 
@@ -1190,9 +1086,11 @@ function renderMessage(msg) {
       img.src = mediaUrl;
       img.alt = "Photo";
       img.addEventListener("click", () => {
-        // Remember exactly which message opened the external file. When the user
-        // returns to this chat, restore the viewport to this message instead of
-        // jumping to the newest message.
+        // Remember exactly which message opened the external file, so coming
+        // back to this tab (bfcache / tab switch, no reload) can restore the
+        // viewport to this message. Cleared on every fresh page load — see
+        // the wipe near the top of this file — so it can never leak into a
+        // reload and reposition the chat to some old spot in history.
         try {
           sessionStorage.setItem("circle-return-message-id", String(msg.id));
           sessionStorage.setItem("circle-return-scroll-top", String(messageList.scrollTop));
@@ -1427,22 +1325,11 @@ function updateJumpBottom() {
   jumpBottom.classList.remove("hidden");
 }
 
-let saveScrollTimer = null;
 messageList.addEventListener("scroll", () => {
   if (isNearBottom() && unseenWhileScrolledUp > 0) {
     unseenWhileScrolledUp = 0;
   }
   updateJumpBottom();
-
-  // Persist where the reader is in this conversation (debounced — scroll
-  // events fire continuously), so reopening/refreshing returns here.
-  if (currentPartner) {
-    clearTimeout(saveScrollTimer);
-    const partner = currentPartner;
-    const top = messageList.scrollTop;
-    const nearBottom = isNearBottom();
-    saveScrollTimer = setTimeout(() => saveScrollPosition(partner, top, nearBottom), 150);
-  }
 });
 
 jumpBottom.addEventListener("click", () => {
@@ -1452,33 +1339,49 @@ jumpBottom.addEventListener("click", () => {
 });
 
 
-// Returning from an opened file should preserve the same message position,
-// including on browsers that restore the page without a full reload.
-function scheduleReturnRestore() {
-  const state = getReturnState();
-  if (!state.id) return;
-  pendingRestoreMessageId = state.id;
-  pendingRestoreScrollTop = state.scrollTop;
+// Returning from an opened photo should put the viewport back where it was —
+// but ONLY when the page itself never reloaded (bfcache restore or tab
+// switch): the return state is wiped on every fresh load, and loadMessages
+// always lands on the newest message, so this can never reposition a
+// freshly opened chat.
+function restoreReturnMessagePosition() {
+  if (!currentPartner) return;
+  let id, savedTop;
+  try {
+    id = sessionStorage.getItem("circle-return-message-id");
+    const top = sessionStorage.getItem("circle-return-scroll-top");
+    savedTop = top === null ? null : Number(top);
+  } catch (e) {
+    return;
+  }
+  if (!id) return;
+  sessionStorage.removeItem("circle-return-message-id");
+  sessionStorage.removeItem("circle-return-scroll-top");
 
-  requestAnimationFrame(() => {
-    restoreReturnMessagePosition();
-    // Media/layout can change the scroll height a moment later, so restore
-    // again after the browser has completed the next layout pass.
-    setTimeout(restoreReturnMessagePosition, 120);
-    setTimeout(restoreReturnMessagePosition, 400);
-  });
+  const row = messageRowById[id];
+  if (!row) return;
+  if (Number.isFinite(savedTop)) {
+    messageList.scrollTop = Math.max(0, Math.min(savedTop, messageList.scrollHeight));
+  }
+  // If the saved offset no longer shows the message (layout changed while
+  // away), center the message rather than landing somewhere random.
+  const rect = row.getBoundingClientRect();
+  const listRect = messageList.getBoundingClientRect();
+  if (!(rect.bottom > listRect.top && rect.top < listRect.bottom)) {
+    scrollToMessage(id, "auto");
+  }
 }
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    scheduleReturnRestore();
+    restoreReturnMessagePosition();
     // Messages that arrived while the tab was hidden (so weren't marked
     // seen) get read now that the user is actually looking at the chat.
     if (currentPartner) markConversationSeen();
   }
 });
 
-window.addEventListener("pageshow", scheduleReturnRestore);
+window.addEventListener("pageshow", restoreReturnMessagePosition);
 
 // ---------- Composer errors ----------
 // Failed sends/uploads are otherwise silent (the input is already cleared by
