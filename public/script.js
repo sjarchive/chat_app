@@ -906,7 +906,11 @@ function handleIncomingMessage(msg) {
   const isOpenConversation = currentPartner !== null &&
     (mine ? msg.recipient_id === currentPartner : msg.sender_id === currentPartner);
 
-  if (isOpenConversation) {
+  // Own messages are already shown the instant they're sent (see the
+  // composer's optimistic render below) — when Realtime's echo of that same
+  // insert arrives a moment later, skip re-rendering it so it doesn't show
+  // up twice.
+  if (isOpenConversation && !messageRowById[msg.id]) {
     if (!profileCache[msg.sender_id]) ensureProfileCached(msg.sender_id);
     const wasNearBottom = isNearBottom();
     renderMessage(msg);
@@ -1133,8 +1137,13 @@ function renderMessage(msg) {
   if (mine) {
     const tick = document.createElement("span");
     tick.className = "tick";
-    // Single tick when sent, double (accent blue) once the recipient saw it
-    if (msg.seen_at) {
+    // Faded tick while the send is still in flight (optimistic bubble),
+    // single tick once actually confirmed sent, double (accent blue) once
+    // the recipient saw it.
+    if (msg._pending) {
+      tick.textContent = "✓";
+      tick.classList.add("pending");
+    } else if (msg.seen_at) {
       tick.textContent = "✓✓";
       tick.classList.add("seen");
     } else {
@@ -1389,6 +1398,46 @@ function hideComposerError() {
 }
 
 // ---------- Sending ----------
+// Removes an optimistic bubble that never made it to the server (send failed).
+function removePendingMessage(tempId) {
+  const row = messageRowById[tempId];
+  if (row) {
+    if (lastRowElement === row) lastRowElement = null;
+    row.remove();
+    delete messageRowById[tempId];
+  }
+  delete messageCache[tempId];
+}
+
+// Swaps an optimistic bubble's temp id for the real one once the insert
+// confirms, and clears its faded/pending tick. Mutates optimisticMsg in
+// place (rather than replacing it) so anything already holding a reference
+// to it — e.g. a reply preview started against it — picks up the real id
+// automatically.
+function resolvePendingMessage(optimisticMsg, realMsg) {
+  const tempId = optimisticMsg.id;
+  const pendingRow = messageRowById[tempId];
+  delete messageCache[tempId];
+  delete messageRowById[tempId];
+
+  if (messageRowById[realMsg.id]) {
+    // Realtime's echo of this same insert already rendered it first (rare
+    // race) — drop the now-redundant optimistic bubble instead of showing
+    // the message twice.
+    if (pendingRow) pendingRow.remove();
+    return;
+  }
+
+  Object.assign(optimisticMsg, realMsg, { _pending: false });
+  messageCache[optimisticMsg.id] = optimisticMsg;
+  if (pendingRow) {
+    messageRowById[optimisticMsg.id] = pendingRow;
+    pendingRow.dataset.msgId = optimisticMsg.id;
+    const tick = pendingRow.querySelector(".tick");
+    if (tick) tick.classList.remove("pending");
+  }
+}
+
 composer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = messageInput.value.trim();
@@ -1397,16 +1446,40 @@ composer.addEventListener("submit", async (e) => {
   messageInput.value = "";
   hideComposerError();
 
-  const { error } = await supabaseClient
+  // Show the bubble immediately (WhatsApp/Telegram-style) instead of
+  // waiting on the round trip to the server and back through Realtime — the
+  // tick starts faded and solidifies once the send is actually confirmed.
+  const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const optimisticMsg = {
+    id: tempId,
+    sender_id: currentUser.id,
+    recipient_id: currentPartner,
+    body: text,
+    media_path: null,
+    media_type: null,
+    reply_to: replyId,
+    created_at: new Date().toISOString(),
+    seen_at: null,
+    _pending: true,
+  };
+  renderMessage(optimisticMsg);
+  scrollToBottom();
+
+  const { data, error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, body: text, reply_to: replyId });
+    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, body: text, reply_to: replyId })
+    .select()
+    .single();
   if (error) {
     console.error(error);
-    // The message never made it to the server — put it back so nothing is
-    // lost. The reply context was never cancelled, so it stays for the retry.
+    // The message never made it to the server — drop the optimistic bubble
+    // and put the text back so nothing is lost. The reply context was never
+    // cancelled, so it stays for the retry.
+    removePendingMessage(tempId);
     messageInput.value = text;
     showComposerError("Couldn't send — check your connection and try again.");
   } else {
+    resolvePendingMessage(optimisticMsg, data);
     cancelReply();
   }
 });
