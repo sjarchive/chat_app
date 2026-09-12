@@ -388,7 +388,9 @@ function enterApp() {
     if (savedPartner) {
       chatsScreen.classList.add("hidden");
       loadChatSummaries();
-      openConversation(savedPartner);
+      // replace=true: the refresh already reused this history entry, so
+      // re-opening must not push a duplicate chat entry behind back.
+      openConversation(savedPartner, true);
     } else {
       currentPartner = null;
       chatScreen.classList.add("hidden");
@@ -420,9 +422,21 @@ function clearStoredOpenChat() {
 }
 
 // ---------- Conversation navigation ----------
-async function openConversation(partnerId) {
+// Each opened conversation gets its own history entry, so the phone's /
+// browser's back button walks back out of a chat to the chats list instead
+// of leaving the site. `replace` (used when a refresh reopens the saved
+// conversation) swaps the state on the current entry rather than stacking
+// a duplicate one.
+async function openConversation(partnerId, replace = false) {
   currentPartner = partnerId;
   setStoredOpenChat(partnerId);
+  try {
+    if (replace || history.state?.circleChat) {
+      history.replaceState({ circleChat: partnerId }, "");
+    } else {
+      history.pushState({ circleChat: partnerId }, "");
+    }
+  } catch (e) {}
   chatPartnerName.textContent = profileCache[partnerId] || "…";
   if (!profileCache[partnerId]) {
     const name = await ensureProfileCached(partnerId);
@@ -462,11 +476,34 @@ function closeConversation() {
   clearStoredOpenChat();
 }
 
-backButton.addEventListener("click", async () => {
+async function goBackToChats() {
   closeConversation();
   chatsScreen.classList.remove("hidden");
   setAppHeight();
   await loadChatSummaries();
+}
+
+// In-app back arrow: unwind the history entry so the phone's back button and
+// this arrow stay in sync (both end up on the chats-list entry).
+backButton.addEventListener("click", () => {
+  if (history.state?.circleChat && history.length > 1) {
+    history.back(); // the popstate handler below does the actual switch
+  } else {
+    // Hard-loaded straight into a chat with nothing to unwind: close
+    // manually and clear the state so the phone's back button can't
+    // re-enter a stale conversation afterwards.
+    try { history.replaceState(null, ""); } catch (e) {}
+    goBackToChats();
+  }
+});
+
+// Phone/browser back or forward: mirror the UI to whatever entry we landed on.
+window.addEventListener("popstate", (e) => {
+  if (currentPartner && !e.state?.circleChat) {
+    goBackToChats();
+  } else if (!currentPartner && e.state?.circleChat) {
+    openConversation(e.state.circleChat, true);
+  }
 });
 
 // ---------- Profiles ----------
