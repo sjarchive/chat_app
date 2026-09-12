@@ -1524,6 +1524,23 @@ messageList.addEventListener("scroll", () => {
   });
 });
 
+// Opening the reply strip, showing a composer error, or the mobile keyboard
+// resizing the page all shrink the message list WITHOUT firing a scroll
+// event — leaving the button's near-bottom state stale. Re-check whenever
+// the list's box size changes (shares the scroll listener's RAF throttle).
+if (typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => {
+    if (jumpBottomTick) return;
+    jumpBottomTick = true;
+    requestAnimationFrame(() => {
+      jumpBottomTick = false;
+      updateJumpBottom();
+    });
+  }).observe(messageList);
+} else {
+  window.addEventListener("resize", updateJumpBottom);
+}
+
 jumpBottom.addEventListener("click", () => {
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   unseenWhileScrolledUp = 0;

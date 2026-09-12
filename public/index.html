@@ -588,9 +588,12 @@ html, body {
 .jump-bottom {
   position: absolute;
   right: 16px;
-  /* Anchored to the chat screen (.screen is position:relative), floating
-     above the composer rather than inside the scrolling message content. */
-  bottom: 82px;
+  /* Anchored to .composer-stack: bottom:100% floats the button directly
+     above the stack's top edge — above the reply strip (and its ✕) when a
+     reply is active, above the input bar otherwise. The 10px gap keeps it
+     clear of the strip's shadow/edge. */
+  bottom: 100%;
+  margin-bottom: 10px;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -609,6 +612,15 @@ html, body {
 #jump-bottom-count:empty { display: none; }
 
 /* ---------- Composer ---------- */
+/* Wraps reply-preview + composer-error + composer so the jump-bottom button
+   can anchor to the stack's top edge: when the reply strip opens, the stack
+   grows upward and carries the button with it, keeping the button above the
+   ✕ instead of on top of it. */
+.composer-stack {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .composer-error {
   padding: 6px 16px;
   font-size: 14px;
@@ -815,29 +827,31 @@ html, body {
 
     <main id="message-list" class="message-list"></main>
 
-    <!-- Lives OUTSIDE the scrolling message list: an absolutely positioned
-         child of a scroll container is positioned within the scrollable
-         content and scrolls away with it, so it would only ever be visible
-         at the very bottom of the history — exactly where it's not needed.
-         Pinned to the chat screen instead, floating above the composer. -->
-    <button type="button" id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></button>
+    <div class="composer-stack">
+      <!-- Anchored to this wrapper (see .composer-stack/.jump-bottom CSS):
+           it floats directly above whichever part of the composer stack is
+           currently visible — above the reply strip's ✕ when a reply is
+           active, above the input bar otherwise. The reply strip and error
+           banner grow the stack upward, so they can never be overlapped. -->
+      <button type="button" id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></button>
 
-    <div id="reply-preview" class="reply-preview hidden">
-      <div class="reply-preview-info">
-        <span id="reply-preview-name" class="reply-preview-name"></span>
-        <span id="reply-preview-text" class="reply-preview-text"></span>
+      <div id="reply-preview" class="reply-preview hidden">
+        <div class="reply-preview-info">
+          <span id="reply-preview-name" class="reply-preview-name"></span>
+          <span id="reply-preview-text" class="reply-preview-text"></span>
+        </div>
+        <button type="button" id="reply-preview-cancel" class="icon-button" aria-label="Cancel reply">✕</button>
       </div>
-      <button type="button" id="reply-preview-cancel" class="icon-button" aria-label="Cancel reply">✕</button>
+
+      <p id="composer-error" class="composer-error hidden" role="alert"></p>
+
+      <form id="composer" class="composer">
+        <button type="button" id="attach-button" class="icon-button" aria-label="Attach media">📎</button>
+        <input id="attach-input" type="file" accept="image/*" class="hidden-field" />
+        <input id="message-input" type="text" placeholder="Message" autocomplete="off" />
+        <button type="submit" id="send-button" class="send-button" aria-label="Send">➤</button>
+      </form>
     </div>
-
-    <p id="composer-error" class="composer-error hidden" role="alert"></p>
-
-    <form id="composer" class="composer">
-      <button type="button" id="attach-button" class="icon-button" aria-label="Attach media">📎</button>
-      <input id="attach-input" type="file" accept="image/*" class="hidden-field" />
-      <input id="message-input" type="text" placeholder="Message" autocomplete="off" />
-      <button type="submit" id="send-button" class="send-button" aria-label="Send">➤</button>
-    </form>
 
   </div>
 
