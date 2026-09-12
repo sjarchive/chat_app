@@ -1150,6 +1150,20 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
   let swiping = false; // we've committed to a horizontal swipe
   let dragDistance = 0; // uncapped left-drag distance, used for the threshold check
 
+  // Re-applies the stylesheet's transitions (including the theme cross-fade
+  // properties) after touchstart blanked them out to "none" for drag
+  // responsiveness. Shared by endSwipe() and the vertical-scroll-cancel path
+  // below, since both leave the row in a state that needs the same restore.
+  function restoreTransitions() {
+    replyBtn.style.transition = "width 0.18s ease, padding 0.18s ease, opacity 0.15s ease, background-color 0.3s ease, color 0.3s ease";
+    bubble.style.transition = mine
+      ? "background-color 0.3s ease, color 0.3s ease"
+      : "transform 0.18s ease, background-color 0.3s ease, color 0.3s ease";
+    if (!mine) {
+      replyBtn.style.transition += ", transform 0.18s ease";
+    }
+  }
+
   row.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
     startX = e.touches[0].clientX;
@@ -1170,8 +1184,13 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
     if (!swiping) {
       if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
       if (Math.abs(dy) > Math.abs(dx)) {
-        // Vertical scroll — let the page handle it, not us.
+        // Vertical scroll — let the page handle it, not us. Restore the
+        // transitions touchstart blanked out: dragging=false makes
+        // endSwipe() a no-op on touchend, so without this the row is left
+        // with transition:none until it's touched again, and its bubble
+        // snaps instantly on the next theme toggle instead of cross-fading.
         dragging = false;
+        restoreTransitions();
         return;
       }
       swiping = true;
@@ -1204,23 +1223,14 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
     // properties: this inline style overrides the stylesheet, so omitting
     // them here would leave a swiped message's reply icon outside the
     // light/dark cross-fade.
-    replyBtn.style.transition = "width 0.18s ease, padding 0.18s ease, opacity 0.15s ease, background-color 0.3s ease, color 0.3s ease";
+    restoreTransitions();
     replyBtn.style.width = "0px";
     replyBtn.style.padding = "0px";
     replyBtn.style.opacity = "0";
-    // Restore the bubble's theme cross-fade regardless of mine/theirs —
-    // touchstart above blanks it out for every row it's touched (not just
-    // ones actually swiped), and leaving it unset here meant "mine" bubbles,
-    // which never got an explicit transform reset, stayed stuck without a
-    // theme transition for the rest of the session.
-    bubble.style.transition = mine
-      ? "background-color 0.3s ease, color 0.3s ease"
-      : "transform 0.18s ease, background-color 0.3s ease, color 0.3s ease";
     if (!mine) {
       // Same reasoning as replyBtn above: inline transition overrides the
       // universal theme transition, so include the theme properties here too.
       bubble.style.transform = "translateX(0)";
-      replyBtn.style.transition += ", transform 0.18s ease";
       replyBtn.style.transform = "translateX(0)";
     }
     if (swiping && dragDistance >= THRESHOLD) {
