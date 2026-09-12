@@ -570,11 +570,17 @@ function clearStoredOpenChat() {
 
 // Hover tooltip for the chat header name: reveals the partner's username —
 // the sign-in handle used to search for them — alongside their display name.
-// Empty until the username lands in the cache (profiles load / search result /
-// ad-hoc fetch), then stays in sync wherever the header name is rewritten.
+// Uses the styled data-tip bubble (same system as the header icon buttons);
+// the attribute is removed entirely while the username isn't cached, since an
+// empty data-tip would still render an empty bubble. Stays in sync wherever
+// the header name is rewritten.
 function updatePartnerNameTitle() {
   const username = currentPartner ? usernameCache[currentPartner] : null;
-  chatPartnerName.title = username ? `@${username}` : "";
+  if (username) {
+    chatPartnerName.dataset.tip = `@${username}`;
+  } else {
+    chatPartnerName.removeAttribute("data-tip");
+  }
 }
 
 // ---------- Conversation navigation ----------

@@ -292,15 +292,17 @@ input, textarea {
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.3s ease;
 }
 
-/* ---------- Custom hover tooltips (icon buttons) ----------
-   Native title= tooltips are replaced by a styled ::after bubble: rounded,
-   theme-aware, appearing a short grace period after the cursor settles so
-   sweeping across the header buttons doesn't pop a tooltip for every button
-   merely passed over (that, plus the slow hover fade above, is what read as
-   "stuttery"). background/border/color are re-listed so this rule's
-   transition doesn't drop the theme cross-fade the universal rule provides. */
-.icon-button[data-tip] { position: relative; }
-.icon-button[data-tip]::after {
+/* ---------- Custom hover tooltips ----------
+   Native title= tooltips are replaced by a styled ::after bubble on any
+   element carrying a data-tip attribute (header icon buttons, the chat
+   header's partner name): rounded, theme-aware, appearing a short grace
+   period after the cursor settles so sweeping across the header buttons
+   doesn't pop a tooltip for every button merely passed over (that, plus the
+   slow hover fade above, is what read as "stuttery"). background/border/
+   color are re-listed so this rule's transition doesn't drop the theme
+   cross-fade the universal rule provides. */
+[data-tip] { position: relative; }
+[data-tip]::after {
   content: attr(data-tip);
   position: absolute;
   top: calc(100% + 7px);
@@ -322,8 +324,8 @@ input, textarea {
   transition: opacity 0.15s ease, transform 0.15s ease,
               background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
-.icon-button[data-tip]:hover::after,
-.icon-button[data-tip]:focus-visible::after {
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
   /* The grace period: hover-in waits ~half a second; hover-out uses the base
