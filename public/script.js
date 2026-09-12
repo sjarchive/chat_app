@@ -16,6 +16,7 @@ const userSearch = document.getElementById("user-search");
 const searchResults = document.getElementById("search-results");
 const backButton = document.getElementById("back-button");
 const chatPartnerName = document.getElementById("chat-partner-name");
+const partnerPresence = document.getElementById("partner-presence");
 const messageList = document.getElementById("message-list");
 const composer = document.getElementById("composer");
 const messageInput = document.getElementById("message-input");
@@ -87,6 +88,9 @@ let messagesChannel = null; // live INSERT/UPDATE/DELETE subscription for messag
 let profilesChannel = null; // live UPDATE/DELETE subscription for profiles
 let messagesChannelSince = 0; // when each channel was (re)built, for stuck-join detection
 let profilesChannelSince = 0;
+let presenceChannel = null; // shared realtime presence channel (green online dots)
+let presenceChannelSince = 0;
+let onlineUsers = new Set(); // user ids currently connected, from presence sync
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -376,6 +380,15 @@ function resetToAuthScreen() {
   currentUser = null;
   currentPartner = null;
   closeConversation();
+  // Leaving also stops broadcasting presence: removing the channel sends the
+  // leave, so other users' dots go gray immediately rather than waiting for
+  // the socket to time out. Clear the local set too so no dot outlives it.
+  if (presenceChannel) {
+    supabaseClient.removeChannel(presenceChannel).catch(() => {});
+    presenceChannel = null;
+  }
+  onlineUsers = new Set();
+  renderPresence();
   // Sign-out removed this user's push subscription rows, so allow
   // subscribeToPush to run again if they sign back in this session.
   pushSubscribedForUser = null;
@@ -605,6 +618,9 @@ async function openConversation(partnerId, replace = false) {
   // in when it arrives.
   chatPartnerName.textContent = profileCache[partnerId] || "…";
   updatePartnerNameTitle();
+  // Paint the online dot straight from the last presence sync instead of
+  // waiting for the next sync event to repaint it.
+  renderPresence();
   // Opening the chat reads everything, so its unread badge is stale from
   // here on (markConversationSeen persists this in the database).
   if (chatSummaries[partnerId]) chatSummaries[partnerId].unread = 0;
@@ -650,6 +666,8 @@ function closeConversation() {
   Object.keys(activeTypers).forEach(clearTyping);
   hideEl(chatScreen);
   currentPartner = null;
+  // No conversation open means the header dot has no partner to show.
+  renderPresence();
   clearStoredOpenChat();
   // Desktop two-pane: drop the right pane back to the placeholder and clear
   // the active row highlight in the list.
@@ -810,7 +828,7 @@ function renderChatList() {
   const signature = partners
     .map(
       (p) =>
-        `${p}:${chatSummaries[p].last?.id}:${chatSummaries[p].unread}:${profileCache[p] ?? ""}:${chatSummaries[p].preview ?? ""}`
+        `${p}:${chatSummaries[p].last?.id}:${chatSummaries[p].unread}:${profileCache[p] ?? ""}:${chatSummaries[p].preview ?? ""}:${onlineUsers.has(p) ? 1 : 0}`
     )
     .join("|");
   if (signature === lastChatListSignature) return;
@@ -840,13 +858,19 @@ function renderChatList() {
 
     const top = document.createElement("div");
     top.className = "chat-item-top";
+    // Online dot rides in front of the name; the wrapper keeps name + dot
+    // grouped (a bare extra child would be pushed apart by space-between).
+    const nameWrap = document.createElement("span");
+    nameWrap.className = "chat-item-namewrap";
+    if (onlineUsers.has(partner)) nameWrap.appendChild(makePresenceDot());
     const name = document.createElement("span");
     name.className = "chat-item-name";
     name.textContent = profileCache[partner] || "Someone";
+    nameWrap.appendChild(name);
     const time = document.createElement("span");
     time.className = "chat-item-time";
     time.textContent = timeLabel(s.last.created_at);
-    top.appendChild(name);
+    top.appendChild(nameWrap);
     top.appendChild(time);
 
     const bottom = document.createElement("div");
@@ -1331,6 +1355,10 @@ function ensureRealtime() {
     supabaseClient.removeChannel(profilesChannel).catch(() => {});
     profilesChannel = null;
   }
+  if (channelIsDead(presenceChannel, presenceChannelSince)) {
+    supabaseClient.removeChannel(presenceChannel).catch(() => {});
+    presenceChannel = null;
+  }
   if (!messagesChannel) {
     messagesChannel = buildMessagesChannel();
     messagesChannelSince = Date.now();
@@ -1339,7 +1367,99 @@ function ensureRealtime() {
     profilesChannel = buildProfilesChannel();
     profilesChannelSince = Date.now();
   }
+  if (!presenceChannel) {
+    presenceChannel = buildPresenceChannel();
+    presenceChannelSince = Date.now();
+  }
 }
+
+// ---------- Presence (green online dot) ----------
+// Supabase Realtime presence on one shared channel: every signed-in client
+// tracks itself (keyed by user id), and each client's presence sync reports
+// exactly who else is currently connected. No database writes or schema
+// changes — and when a client's socket drops (tab closed, phone suspended),
+// Realtime removes it from the sync automatically, so "online" always means
+// "the app is actually connected right now", not "was seen recently".
+// Multiple tabs/devices of the same user collapse onto one key (Phoenix
+// presence stores an array of metas per key), and the dot stays lit until
+// the last one disconnects.
+function buildPresenceChannel() {
+  const channel = supabaseClient.channel("circle-presence", {
+    config: { presence: { key: currentUser.id } },
+  });
+  channel
+    .on("presence", { event: "sync" }, () => {
+      onlineUsers = new Set(Object.keys(channel.presenceState()));
+      renderPresence();
+    })
+    .subscribe((status) => {
+      // Announce this client only once the subscription is actually live;
+      // tracking earlier would silently do nothing.
+      if (status === "SUBSCRIBED") channel.track({ online_at: new Date().toISOString() });
+    });
+  return channel;
+}
+
+// Repaints everything presence affects: the open conversation's header dot
+// and the chats list (whose render signature includes online state, so a
+// change actually repaints).
+function renderPresence() {
+  if (partnerPresence) {
+    partnerPresence.classList.toggle("hidden", !(currentPartner && onlineUsers.has(currentPartner)));
+  }
+  renderChatListIfVisible();
+}
+
+// Mobile has no hover, so the dot's "Online" tooltip needs a touch path:
+// holding the dot for ~450ms adds .tip-on (showing the ::after bubble), and
+// the tooltip lingers briefly after the finger lifts so it can be read. If
+// the dot sits inside a tappable row (chats list), the hold must not then
+// fire the row's tap handler — hence the suppressed click.
+function attachTipHold(el) {
+  let timer = null;
+  let shown = false;
+  el.addEventListener("touchstart", () => {
+    clearTimeout(timer);
+    shown = false;
+    timer = setTimeout(() => {
+      el.classList.add("tip-on");
+      shown = true;
+    }, 450);
+  }, { passive: true });
+  // Any finger movement means scrolling, not a deliberate hold.
+  el.addEventListener("touchmove", () => clearTimeout(timer), { passive: true });
+  el.addEventListener("touchcancel", () => clearTimeout(timer));
+  el.addEventListener("touchend", () => {
+    clearTimeout(timer);
+    if (shown) {
+      el._suppressClick = true;
+      setTimeout(() => {
+        el.classList.remove("tip-on");
+        el._suppressClick = false;
+      }, 900);
+    }
+  });
+  el.addEventListener("click", (e) => {
+    if (el._suppressClick) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
+
+// A standalone dot element for chats-list rows (the header's dot is static
+// markup in index.html).
+function makePresenceDot() {
+  const dot = document.createElement("span");
+  dot.className = "presence-dot";
+  dot.dataset.tip = "Online";
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", "Online");
+  attachTipHold(dot);
+  return dot;
+}
+
+attachTipHold(partnerPresence);
 
 // Coalesces bursts of message DELETEs (a whole conversation wiped at once)
 // into a single summaries refresh.

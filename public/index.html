@@ -333,6 +333,71 @@ input, textarea {
   transition-delay: 0.45s, 0.45s, 0s, 0s, 0s;
 }
 
+/* ---------- Presence (online dot) ----------
+   A green dot appears next to a user's name while their app is connected
+   (see buildPresenceChannel in script.js). Shown in the open conversation's
+   header and on every chats-list row; carries a styled "Online" tooltip. */
+.presence-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #22C55E;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+  flex-shrink: 0;
+}
+.chat-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-item-namewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+/* The presence dot reuses the icon buttons' styled tooltip bubble: desktop
+   gets it on hover (grace period included), mobile has no hover so a
+   long-press (~450ms) adds .tip-on via attachTipHold() in script.js, which
+   shows the same bubble immediately. */
+.presence-dot[data-tip] { position: relative; }
+.presence-dot[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-3px);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 30;
+  transition: opacity 0.15s ease, transform 0.15s ease,
+              background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+/* Hover path only on devices that actually hover: a touch tap would
+   otherwise leave a sticky :hover state and a tooltip that never leaves.
+   (focus-visible stays outside — a keyboard user tabbing to the dot should
+   get the tooltip regardless of pointer type.) */
+@media (hover: hover) and (pointer: fine) {
+  .presence-dot[data-tip]:hover::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    /* Same grace period as the icon buttons: hover-in waits ~half a second;
+       hover-out uses the base rule's 0 delay. */
+    transition-delay: 0.45s, 0.45s, 0s, 0s, 0s;
+  }
+}
+.presence-dot[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+/* Long-press path: the 0.45s wait already happened in JS, so show instantly. */
+.presence-dot[data-tip].tip-on::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .message-list {
   flex: 1;
   overflow-y: auto;
@@ -985,7 +1050,10 @@ input, textarea {
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <div class="chat-header-info">
-        <span class="chat-title" id="chat-partner-name">…</span>
+        <div class="chat-title-row">
+          <span id="partner-presence" class="presence-dot hidden" data-tip="Online" role="img" aria-label="Online"></span>
+          <span class="chat-title" id="chat-partner-name">…</span>
+        </div>
         <span class="chat-sub hidden" id="typing-indicator"></span>
       </div>
     </header>
