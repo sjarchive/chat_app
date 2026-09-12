@@ -61,6 +61,9 @@
   --accent-text: #1B1300;
   --danger: #C4574B;
   --border: #232A34;
+  /* Desktop two-pane divider: needs more contrast than --border in light
+     mode, where #E9EDEF sits invisibly between the white panes. */
+  --pane-divider: #232A34;
 }
 
 /* WhatsApp-style light theme */
@@ -78,6 +81,7 @@
   --accent-text: #FFFFFF;
   --danger: #C4574B;
   --border: #E9EDEF;
+  --pane-divider: #D1D7DB;
 }
 
 html, body {
@@ -678,7 +682,7 @@ input, textarea {
     flex: 0 0 30%;
     min-width: 320px;
     max-width: 420px;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--pane-divider);
   }
 
   html.app-visible #chat-screen { flex: 1; min-width: 0; }
