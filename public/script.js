@@ -778,14 +778,20 @@ async function loadMessages(includeMessageId = null) {
   // Always open the conversation at the newest message. scrollTop is set
   // directly (no smooth scroll), so the latest message is simply what's on
   // screen from the first paint.
-  scrollToBottom();
-  // Images and content-visibility placeholders resolving a few frames later
-  // can change the scroll height and nudge the viewport off the bottom;
-  // re-assert it briefly. isNearBottom() guards this so a user who scrolled
-  // up immediately is never dragged back down.
-  requestAnimationFrame(() => { if (isNearBottom()) scrollToBottom(); });
-  setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 100);
-  setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 300);
+  // Skipped on the scrollToMessage() path (includeMessageId set): that call
+  // only re-renders to materialize the target row, and these bottom-anchors
+  // would fire mid-flight and yank the user back down before the scroll to
+  // the target finishes.
+  if (!includeMessageId) {
+    scrollToBottom();
+    // Images and content-visibility placeholders resolving a few frames later
+    // can change the scroll height and nudge the viewport off the bottom;
+    // re-assert it briefly. isNearBottom() guards this so a user who scrolled
+    // up immediately is never dragged back down.
+    requestAnimationFrame(() => { if (isNearBottom()) scrollToBottom(); });
+    setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 100);
+    setTimeout(() => { if (isNearBottom()) scrollToBottom(); }, 300);
+  }
   updateJumpBottom();
 }
 
@@ -946,21 +952,33 @@ async function scrollToMessage(id, behavior = "smooth") {
   // scrollIntoView() can choose a different scroll container when nested
   // layout changes (especially on mobile). Keep the jump explicitly inside the
   // message list so the chat itself, not the page, is what moves.
-  const listRect = messageList.getBoundingClientRect();
-  const rowRect = row.getBoundingClientRect();
-  const targetTop = messageList.scrollTop +
-    (rowRect.top - listRect.top) -
-    (messageList.clientHeight - rowRect.height) / 2;
-  const maxScrollTop = Math.max(0, messageList.scrollHeight - messageList.clientHeight);
-  messageList.scrollTo({
-    top: Math.max(0, Math.min(targetTop, maxScrollTop)),
-    behavior,
-  });
+  const aimAt = (b) => {
+    const listRect = messageList.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const targetTop = messageList.scrollTop +
+      (rowRect.top - listRect.top) -
+      (messageList.clientHeight - rowRect.height) / 2;
+    const maxScrollTop = Math.max(0, messageList.scrollHeight - messageList.clientHeight);
+    messageList.scrollTo({
+      top: Math.max(0, Math.min(targetTop, maxScrollTop)),
+      behavior: b,
+    });
+  };
 
-  row.classList.remove("highlight-flash");
-  void row.offsetWidth;
-  row.classList.add("highlight-flash");
-  setTimeout(() => row.classList.remove("highlight-flash"), 1200);
+  // First pass is instant: off-screen rows are content-visibility placeholders
+  // (44px tall) until they're actually scrolled near, so a distance-based
+  // computation done from the start position measures the row against
+  // placeholder heights and lands in the wrong place. Jumping there without
+  // animation forces the row to render at its real size, then the second pass
+  // re-aims and animates from nearby, where the measurements are accurate.
+  aimAt("auto");
+  requestAnimationFrame(() => {
+    aimAt(behavior);
+    row.classList.remove("highlight-flash");
+    void row.offsetWidth;
+    row.classList.add("highlight-flash");
+    setTimeout(() => row.classList.remove("highlight-flash"), 1200);
+  });
   return true;
 }
 
