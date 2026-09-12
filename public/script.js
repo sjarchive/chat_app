@@ -1119,6 +1119,13 @@ function renderMessage(msg) {
       img.className = "media";
       img.src = mediaUrl;
       img.alt = "Photo";
+      // The initial auto-scroll only has a short fixed window to correct for
+      // layout shifts (see loadMessages). A photo that finishes loading after
+      // that window has closed grows the list and permanently leaves the
+      // viewport stuck above the real bottom — this event-driven correction
+      // has no time limit, so it always catches up, however slow the load.
+      img.addEventListener("load", () => { if (isNearBottom()) scrollToBottom(); });
+      img.addEventListener("error", () => { if (isNearBottom()) scrollToBottom(); });
       img.addEventListener("click", () => {
         window.open(mediaUrl, "_blank", "noopener,noreferrer");
       });
