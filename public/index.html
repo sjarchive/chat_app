@@ -549,8 +549,8 @@ html, body {
 
 .jump-bottom {
   position: absolute;
-  right: 20px;
-  bottom: 78px;
+  right: 16px;
+  bottom: 12px;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -772,9 +772,9 @@ html, body {
       </div>
     </header>
 
-    <main id="message-list" class="message-list"></main>
-
-    <div id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></div>
+    <main id="message-list" class="message-list">
+      <div id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></div>
+    </main>
 
     <div id="reply-preview" class="reply-preview hidden">
       <div class="reply-preview-info">
