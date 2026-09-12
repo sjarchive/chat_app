@@ -465,11 +465,11 @@ async function openConversation(partnerId, replace = false) {
       history.pushState({ circleChat: partnerId }, "");
     }
   } catch (e) {}
+  // The screen switch below must happen BEFORE any network awaits — awaiting
+  // the partner's profile name first left the user staring at the chats list
+  // for a full round trip after tapping a chat. Show "…" and fill the name
+  // in when it arrives.
   chatPartnerName.textContent = profileCache[partnerId] || "…";
-  if (!profileCache[partnerId]) {
-    const name = await ensureProfileCached(partnerId);
-    if (name) chatPartnerName.textContent = name;
-  }
   // Opening the chat reads everything, so its unread badge is stale from
   // here on (markConversationSeen persists this in the database).
   if (chatSummaries[partnerId]) chatSummaries[partnerId].unread = 0;
@@ -477,6 +477,11 @@ async function openConversation(partnerId, replace = false) {
   chatsScreen.classList.add("hidden");
   chatScreen.classList.remove("hidden");
   setAppHeight();
+  if (!profileCache[partnerId]) {
+    ensureProfileCached(partnerId).then((name) => {
+      if (name && currentPartner === partnerId) chatPartnerName.textContent = name;
+    });
+  }
   // Clear out the previous conversation's messages immediately, rather than
   // leaving them on screen until loadMessages()'s fetch resolves — otherwise
   // there's a visible flash of stale content right after the screen switches.
@@ -493,7 +498,7 @@ async function openConversation(partnerId, replace = false) {
 
 function closeConversation() {
   // Detach the typing broadcast for this conversation so signals from it
-  // stop arriving while browsing the chats list.
+  // stop arriving while browsing the chats list (or after sign-out).
   if (typingChannel) {
     supabaseClient.removeChannel(typingChannel);
     typingChannel = null;
@@ -508,7 +513,12 @@ async function goBackToChats() {
   closeConversation();
   chatsScreen.classList.remove("hidden");
   setAppHeight();
-  await loadChatSummaries();
+  // Paint immediately from the summaries we already hold (kept up to date by
+  // the realtime handlers and optimistic sends) instead of blocking on a
+  // network fetch — then re-sync in the background in case anything was
+  // missed, which just quietly re-renders the same list.
+  renderChatList();
+  loadChatSummaries();
 }
 
 // In-app back arrow: unwind the history entry so the phone's back button and
@@ -1587,6 +1597,9 @@ composer.addEventListener("submit", async (e) => {
   };
   renderMessage(optimisticMsg);
   scrollToBottom();
+  // Keep the chats-list preview in sync from the instant the bubble appears,
+  // so going back shows the new message without waiting on any fetch.
+  updateChatSummaryFor(optimisticMsg);
 
   const { data, error } = await supabaseClient
     .from("messages")
@@ -1603,6 +1616,9 @@ composer.addEventListener("submit", async (e) => {
     showComposerError("Couldn't send — check your connection and try again.");
   } else {
     resolvePendingMessage(optimisticMsg, data);
+    // The optimistic entry above used a client timestamp; now that the real
+    // row is back (with its server id/created_at), refresh the preview from it.
+    updateChatSummaryFor(optimisticMsg);
     cancelReply();
   }
 });
