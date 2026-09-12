@@ -376,6 +376,9 @@ function resetToAuthScreen() {
   // subscribeToPush to run again if they sign back in this session.
   pushSubscribedForUser = null;
   document.documentElement.classList.remove("has-session");
+  // Desktop two-pane: drop the signed-in shell so the desktop layout CSS
+  // stops force-showing the chats list next to the auth screen.
+  document.documentElement.classList.remove("app-visible");
   showEl(authScreen);
   hideEl(chatsScreen);
   hideEl(chatScreen);
@@ -426,7 +429,7 @@ function buildProfilesChannel() {
 
         // ...and the conversation header / chats-list rows showing that name
         if (currentPartner === id) chatPartnerName.textContent = display_name;
-        if (!chatsScreen.classList.contains("hidden")) renderChatList();
+        if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
         if (replyingTo && replyingTo.sender_id === id) {
           replyPreviewName.textContent = display_name;
         }
@@ -471,7 +474,7 @@ async function handleProfileDeleted(id) {
     goBackToChats();
     return;
   }
-  if (!chatsScreen.classList.contains("hidden")) renderChatList();
+  if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
 }
 
 async function enterApp() {
@@ -484,6 +487,10 @@ async function enterApp() {
   // otherwise those overrides keep outranking every future .hidden toggle.
   document.documentElement.classList.remove("has-session");
   document.documentElement.classList.remove("has-open-chat");
+  // Desktop two-pane: marks the signed-in shell so the desktop layout CSS
+  // (chats list pane + conversation pane) applies — removed again on
+  // sign-out so the overrides can't leak onto the auth screen.
+  document.documentElement.classList.add("app-visible");
   hideEl(authScreen);
   setAppHeight();
 
@@ -502,6 +509,10 @@ async function enterApp() {
   // user refreshed the page), reopen it instead of dropping back to the
   // chats list.
   const savedPartner = getStoredOpenChat();
+  // Desktop two-pane: when a conversation is about to be reopened, reveal
+  // the right pane right away instead of showing the placeholder until
+  // openConversation() runs (after profiles load). No-op on mobile.
+  if (savedPartner) document.documentElement.classList.add("chat-open");
 
   loadProfiles().then(() => {
     // ensureRealtime() is idempotent: sign out/back in within this tab, tab
@@ -517,6 +528,7 @@ async function enterApp() {
       openConversation(savedPartner, true);
     } else {
       currentPartner = null;
+      document.documentElement.classList.remove("chat-open");
       chatScreen.classList.add("hidden");
       chatsScreen.classList.remove("hidden");
       loadChatSummaries();
@@ -573,6 +585,12 @@ async function openConversation(partnerId, replace = false) {
   hideEl(chatsScreen);
   showEl(chatScreen);
   setAppHeight();
+  // Desktop two-pane: reveal the right pane (until now the placeholder was
+  // showing) and repaint the still-visible left pane so this conversation's
+  // unread badge clears and its row gets the active highlight.
+  document.documentElement.classList.add("chat-open");
+  renderChatListIfVisible();
+  updateActiveChatItem();
   if (!profileCache[partnerId]) {
     ensureProfileCached(partnerId).then((name) => {
       if (name && currentPartner === partnerId) chatPartnerName.textContent = name;
@@ -603,6 +621,10 @@ function closeConversation() {
   hideEl(chatScreen);
   currentPartner = null;
   clearStoredOpenChat();
+  // Desktop two-pane: drop the right pane back to the placeholder and clear
+  // the active row highlight in the list.
+  document.documentElement.classList.remove("chat-open");
+  updateActiveChatItem();
 }
 
 async function goBackToChats() {
@@ -729,6 +751,27 @@ function timeLabel(iso) {
 // re-sync runs this often on a healthy client, where it's a pure no-op.
 let lastChatListSignature = null;
 
+// ---------- Desktop two-pane helpers ----------
+// The desktop layout (min-width: 768px in index.html) keeps the chats list
+// visible in a left pane even while a conversation is open — the list pane
+// still carries the mobile flow's "hidden" class underneath, so visibility
+// checks and repaints must account for it.
+function isDesktopLayout() {
+  return window.matchMedia("(min-width: 768px)").matches;
+}
+
+function renderChatListIfVisible() {
+  if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
+}
+
+// Highlights the row of the conversation currently open in the desktop right
+// pane (a no-op for row state on mobile, where no list is visible in a chat).
+function updateActiveChatItem() {
+  chatList.querySelectorAll(".chat-item").forEach((item) => {
+    item.classList.toggle("active", item.dataset.partner === currentPartner);
+  });
+}
+
 function renderChatList() {
   const partners = Object.keys(chatSummaries).sort(
     (a, b) => new Date(chatSummaries[b].last.created_at) - new Date(chatSummaries[a].last.created_at)
@@ -756,6 +799,8 @@ function renderChatList() {
     const s = chatSummaries[partner];
     const item = document.createElement("div");
     item.className = "chat-item";
+    item.dataset.partner = partner;
+    if (partner === currentPartner) item.classList.add("active");
     item.setAttribute("role", "button");
     item.tabIndex = 0;
 
@@ -820,7 +865,7 @@ function updateChatSummaryFor(msg) {
     // plaintext); setSummaryPreview re-renders with the real text.
     s.preview = "";
     setSummaryPreview(s).then(() => {
-      if (!chatsScreen.classList.contains("hidden")) renderChatList();
+      if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
     });
   }
   if (msg.recipient_id === currentUser.id && !msg.seen_at && currentPartner !== partner) s.unread++;
@@ -828,10 +873,10 @@ function updateChatSummaryFor(msg) {
   // until the next full reload — pull the name and repaint the row with it.
   if (!profileCache[partner]) {
     ensureProfileCached(partner).then(() => {
-      if (!chatsScreen.classList.contains("hidden")) renderChatList();
+      if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
     });
   }
-  if (!chatsScreen.classList.contains("hidden")) renderChatList();
+  if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
 }
 
 // ---------- User search ----------
