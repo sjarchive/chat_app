@@ -1412,6 +1412,64 @@ composer.addEventListener("submit", async (e) => {
 });
 
 // ---------- Media attach ----------
+// Compressing before upload (rather than sending the original) is what
+// actually keeps the Supabase Storage free-tier quota (1GB) from filling up
+// fast — a handful of full-resolution phone photos can eat most of that on
+// their own.
+const MAX_IMAGE_DIMENSION = 1600; // longest edge, px
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // cap after compression
+const SKIP_COMPRESSION_BELOW_BYTES = 400 * 1024; // already small — not worth re-encoding
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+    img.src = url;
+  });
+}
+
+function toJpegFilename(name) {
+  return name.replace(/\.\w+$/, "") + ".jpg";
+}
+
+// Resizes to a max dimension and re-encodes as JPEG. Falls back to the
+// original file untouched if anything about compression goes wrong, or if
+// the "compressed" result would actually end up bigger.
+async function compressImage(file) {
+  // Canvas only captures a single frame, so redrawing an animated GIF onto
+  // one would silently strip its animation — leave those alone.
+  if (file.type === "image/gif") return file;
+  if (file.size <= SKIP_COMPRESSION_BELOW_BYTES) return file;
+
+  try {
+    const img = await loadImageFromFile(file);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(img.width, img.height));
+    const width = Math.round(img.width * scale);
+    const height = Math.round(img.height * scale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+    if (!blob || blob.size >= file.size) return file;
+
+    return new File([blob], toJpegFilename(file.name), { type: "image/jpeg" });
+  } catch (err) {
+    console.error(err);
+    return file;
+  }
+}
+
 attachButton.addEventListener("click", () => attachInput.click());
 
 attachInput.addEventListener("change", async () => {
@@ -1427,16 +1485,18 @@ attachInput.addEventListener("change", async () => {
     return;
   }
 
-  if (file.size > 8 * 1024 * 1024) {
-    showComposerError("That image is over 8MB — please choose a smaller one.");
+  const upload = await compressImage(file);
+
+  if (upload.size > MAX_UPLOAD_BYTES) {
+    showComposerError("That image is too large even after compression — please choose a smaller one.");
     return;
   }
 
   const replyId = replyingTo?.id || null;
-  const path = `${currentUser.id}/${Date.now()}-${file.name}`;
+  const path = `${currentUser.id}/${Date.now()}-${upload.name}`;
   const { error: uploadError } = await supabaseClient.storage
     .from("chat-media")
-    .upload(path, file);
+    .upload(path, upload);
   if (uploadError) {
     console.error(uploadError);
     showComposerError("Couldn't upload the image — check your connection and try again.");
@@ -1445,7 +1505,7 @@ attachInput.addEventListener("change", async () => {
 
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, media_path: path, media_type: file.type, reply_to: replyId });
+    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, media_path: path, media_type: upload.type, reply_to: replyId });
   if (error) {
     console.error(error);
     showComposerError("The image uploaded, but the message couldn't be sent. Try attaching it again.");
