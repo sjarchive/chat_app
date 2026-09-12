@@ -347,29 +347,64 @@ function subscribeProfiles() {
 }
 
 function enterApp() {
-  // The flash-prevention "has-session" class (set in <head>, before this
-  // real auth check ran) has a CSS override that force-shows #chats-screen
-  // even while it carries the "hidden" class, specifically so it's visible
-  // during that brief pre-JS window on a refresh. Once we're here, real
-  // classList toggling takes over for the rest of the session — so drop it,
-  // otherwise that override keeps outranking every future .hidden toggle
-  // and the chats list never actually hides again when a chat is opened.
+  // The flash-prevention "has-session"/"has-open-chat" classes (set in
+  // <head>, before this real auth check ran) have CSS overrides that
+  // force-show #chats-screen or #chat-screen even while they carry the
+  // "hidden" class, specifically so the right screen is visible during that
+  // brief pre-JS window on a refresh. Once we're here, real classList
+  // toggling takes over for the rest of the session — so drop them,
+  // otherwise those overrides keep outranking every future .hidden toggle.
   document.documentElement.classList.remove("has-session");
+  document.documentElement.classList.remove("has-open-chat");
   authScreen.classList.add("hidden");
-  chatScreen.classList.add("hidden");
-  chatsScreen.classList.remove("hidden");
   setAppHeight();
-  currentPartner = null;
+
+  // If a conversation was still open the last time this tab loaded (e.g. the
+  // user refreshed the page), reopen it instead of dropping back to the
+  // chats list.
+  const savedPartner = getStoredOpenChat();
+
   loadProfiles().then(() => {
-    loadChatSummaries();
     subscribeRealtime();
     subscribeProfiles();
+    if (savedPartner) {
+      chatsScreen.classList.add("hidden");
+      loadChatSummaries();
+      openConversation(savedPartner);
+    } else {
+      currentPartner = null;
+      chatScreen.classList.add("hidden");
+      chatsScreen.classList.remove("hidden");
+      loadChatSummaries();
+    }
   });
+}
+
+// ---------- Remember which conversation is open, across refreshes ----------
+function getStoredOpenChat() {
+  try {
+    return sessionStorage.getItem("circle-open-chat");
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStoredOpenChat(partnerId) {
+  try {
+    sessionStorage.setItem("circle-open-chat", partnerId);
+  } catch (e) {}
+}
+
+function clearStoredOpenChat() {
+  try {
+    sessionStorage.removeItem("circle-open-chat");
+  } catch (e) {}
 }
 
 // ---------- Conversation navigation ----------
 async function openConversation(partnerId) {
   currentPartner = partnerId;
+  setStoredOpenChat(partnerId);
   chatPartnerName.textContent = profileCache[partnerId] || "…";
   if (!profileCache[partnerId]) {
     const name = await ensureProfileCached(partnerId);
@@ -406,6 +441,7 @@ function closeConversation() {
   Object.keys(activeTypers).forEach(clearTyping);
   chatScreen.classList.add("hidden");
   currentPartner = null;
+  clearStoredOpenChat();
 }
 
 backButton.addEventListener("click", async () => {
@@ -533,10 +569,15 @@ function updateChatSummaryFor(msg) {
 // ---------- User search ----------
 let searchDebounce = null;
 
+// Usernames are 5–10 characters (see validateUsername). Only search once a
+// full username could actually have been typed — partial/mid-typing input
+// shouldn't surface suggestions.
+const USERNAME_MIN_LENGTH = 5;
+
 userSearch.addEventListener("input", () => {
   clearTimeout(searchDebounce);
   const term = userSearch.value.trim().toLowerCase();
-  if (term.length < 2) {
+  if (term.length < USERNAME_MIN_LENGTH) {
     hideSearchResults();
     return;
   }
@@ -547,7 +588,7 @@ async function runUserSearch(term) {
   const { data, error } = await supabaseClient
     .from("profiles")
     .select("id, display_name, username")
-    .ilike("username", `%${term}%`)
+    .eq("username", term)
     .neq("id", currentUser.id)
     .limit(10);
   if (error) return console.error(error);
@@ -615,6 +656,7 @@ async function loadMessages() {
   if (!restoreReturnMessagePosition()) {
     scrollToBottom();
   }
+  updateJumpBottom();
 }
 
 function renderAllMessages(data) {
@@ -1269,26 +1311,29 @@ function scrollToBottom() {
   updateJumpBottom();
 }
 
+// Shown whenever the user has scrolled up into history — not just when new
+// messages arrived while scrolled up — so it always offers a way back down.
+// The count badge only appears on top of that when there's something unseen.
 function updateJumpBottom() {
-  if (unseenWhileScrolledUp > 0) {
-    jumpBottomCount.textContent = unseenWhileScrolledUp;
-    jumpBottom.classList.remove("hidden");
-  } else {
+  if (isNearBottom()) {
     jumpBottom.classList.add("hidden");
+    return;
   }
+  jumpBottomCount.textContent = unseenWhileScrolledUp > 0 ? unseenWhileScrolledUp : "";
+  jumpBottom.classList.remove("hidden");
 }
 
 messageList.addEventListener("scroll", () => {
   if (isNearBottom() && unseenWhileScrolledUp > 0) {
     unseenWhileScrolledUp = 0;
-    updateJumpBottom();
   }
+  updateJumpBottom();
 });
 
 jumpBottom.addEventListener("click", () => {
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   unseenWhileScrolledUp = 0;
-  updateJumpBottom();
+  jumpBottom.classList.add("hidden");
 });
 
 

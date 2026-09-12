@@ -18,6 +18,12 @@
         return key.indexOf("sb-") === 0 && key.indexOf("-auth-token") !== -1 && localStorage.getItem(key);
       });
       if (hasSession) document.documentElement.classList.add("has-session");
+      // If a conversation was open when the page was last refreshed, mark
+      // that too, so the CSS below can pre-paint the chat screen straight
+      // away instead of flashing the chats list first.
+      if (hasSession && sessionStorage.getItem("circle-open-chat")) {
+        document.documentElement.classList.add("has-open-chat");
+      }
     } catch (e) {}
   })();
 </script>
@@ -493,6 +499,7 @@ html, body {
   gap: 4px;
   z-index: 5;
 }
+#jump-bottom-count:empty { display: none; }
 
 /* ---------- Composer ---------- */
 .composer-error {
@@ -611,9 +618,13 @@ html, body {
   /* Paired with the has-session class set in the head script above: applies
      as soon as these elements are inserted, before script.js finishes its
      real auth check, so refreshing while logged in never shows a flash of the
-     auth screen. !important matches .hidden's own specificity. */
+     auth screen. !important matches .hidden's own specificity.
+     When a conversation was open (has-open-chat), pre-paint the chat screen
+     instead of the chats list, so refreshing inside a chat stays in that
+     chat instead of flashing the list before script.js switches screens. */
   html.has-session #auth-screen { display: none !important; }
-  html.has-session #chats-screen.hidden { display: flex !important; }
+  html.has-session:not(.has-open-chat) #chats-screen.hidden { display: flex !important; }
+  html.has-session.has-open-chat #chat-screen.hidden { display: flex !important; }
 </style>
 </head>
 <body>
