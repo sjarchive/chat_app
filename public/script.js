@@ -731,7 +731,7 @@ chatsScreen.addEventListener("click", (e) => {
 });
 
 // ---------- Load message history (current conversation) ----------
-async function loadMessages() {
+async function loadMessages(includeMessageId = null) {
   // Order newest-first so limit(200) keeps the most recent 200 messages,
   // then reverse back to oldest-first for rendering. Ordering ascending
   // before the limit (the old behavior) kept the OLDEST 200 messages in any
@@ -744,7 +744,36 @@ async function loadMessages() {
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) return console.error(error);
-  renderAllMessages(data.reverse());
+
+  const messages = data || [];
+
+  // A reply can point to a message older than the newest 200. When the user
+  // taps that quote, fetch the exact target and include it in this render so
+  // there is a real DOM row for scrollToMessage() to jump to. The conversation
+  // check below is deliberate: the id comes from a reply_to field, so never
+  // render a row from some unrelated conversation even if an id is supplied.
+  if (includeMessageId && !messages.some((msg) => msg.id === includeMessageId)) {
+    const { data: target, error: targetError } = await supabaseClient
+      .from("messages")
+      .select("*")
+      .eq("id", includeMessageId)
+      .maybeSingle();
+
+    const targetBelongsToConversation = target &&
+      ((target.sender_id === currentUser.id && target.recipient_id === currentPartner) ||
+       (target.sender_id === currentPartner && target.recipient_id === currentUser.id));
+
+    if (!targetError && targetBelongsToConversation) {
+      messages.push(target);
+    } else if (targetError) {
+      console.error(targetError);
+    }
+  }
+
+  // The targeted message may be much older than the normal history window, so
+  // sort after adding it to keep the chronological message order intact.
+  messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  renderAllMessages(messages);
 
   // Always open the conversation at the newest message. scrollTop is set
   // directly (no smooth scroll), so the latest message is simply what's on
@@ -894,12 +923,37 @@ function truncate(str, n) {
   return str.length > n ? str.slice(0, n - 1) + "…" : str;
 }
 
-// Scrolls to and briefly highlights a message that's already on screen
-// (used when tapping a quoted reply).
-function scrollToMessage(id, behavior = "smooth") {
-  const row = messageRowById[id];
+// Scrolls to and briefly highlights a message. A reply can target a message
+// outside the normal 200-message history window, so load that exact message
+// first when no rendered row exists yet.
+async function scrollToMessage(id, behavior = "smooth") {
+  let row = messageRowById[id];
+
+  if (!row) {
+    await loadMessages(id);
+    row = messageRowById[id];
+  }
+
+  // The target may have been deleted or may no longer be visible to this user
+  // under RLS. In that case the quote simply does nothing instead of throwing.
   if (!row) return false;
-  row.scrollIntoView({ behavior, block: "center" });
+
+  // scrollIntoView() can choose a different scroll container when nested
+  // layout changes (especially on mobile). Keep the jump explicitly inside the
+  // message list so the chat itself, not the page, is what moves.
+  const listRect = messageList.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const targetTop = messageList.scrollTop +
+    (rowRect.top - listRect.top) -
+    (messageList.clientHeight - rowRect.height) / 2;
+  const maxScrollTop = Math.max(0, messageList.scrollHeight - messageList.clientHeight);
+  messageList.scrollTo({
+    top: Math.max(0, Math.min(targetTop, maxScrollTop)),
+    behavior,
+  });
+
+  row.classList.remove("highlight-flash");
+  void row.offsetWidth;
   row.classList.add("highlight-flash");
   setTimeout(() => row.classList.remove("highlight-flash"), 1200);
   return true;
@@ -1144,7 +1198,14 @@ function renderMessage(msg) {
     } else {
       quoted.textContent = "Original message";
     }
-    quoted.addEventListener("click", () => scrollToMessage(msg.reply_to));
+    quoted.addEventListener("click", async () => {
+      quoted.style.pointerEvents = "none";
+      try {
+        await scrollToMessage(msg.reply_to);
+      } finally {
+        quoted.style.pointerEvents = "";
+      }
+    });
     bubble.appendChild(quoted);
   }
 
