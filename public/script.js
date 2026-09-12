@@ -113,6 +113,23 @@ authToggle.addEventListener("click", () => {
   authFullname.required = isSignUpMode;
 });
 
+// Used right after a successful sign-up: lands the person on the login form
+// instead of the toggle's usual "wipe everything" reset, so they don't have
+// to retype the username they just chose.
+function switchToSignInMode({ prefillUsername, message } = {}) {
+  isSignUpMode = false;
+  authSubmit.textContent = "Sign in";
+  authToggle.textContent = "Need an account? Sign up";
+  resetAuthFields();
+  authFullname.classList.add("hidden");
+  authFullname.required = false;
+  if (prefillUsername) authName.value = prefillUsername;
+  if (message) {
+    authError.style.color = "#3A8B5C";
+    authError.textContent = message;
+  }
+}
+
 passwordToggle.addEventListener("click", () => {
   const showing = authPassword.type === "text";
   authPassword.type = showing ? "password" : "text";
@@ -160,6 +177,14 @@ function validatePassword(password) {
 }
 
 // ---------- Auth submit ----------
+// Set right before signUp() and consumed by onAuthStateChange below: with
+// email confirmation off, Supabase signs the new account straight in and
+// fires a normal SIGNED_IN event, which would otherwise drop the person
+// straight into the app. This flag lets that handler recognize "this
+// SIGNED_IN event is the automatic one from a signup" and sign back out
+// instead, so new users land on the login screen like everyone else.
+let justSignedUp = false;
+
 authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   authError.textContent = "";
@@ -194,6 +219,7 @@ authForm.addEventListener("submit", async (e) => {
 
   try {
     if (isSignUpMode) {
+      justSignedUp = true;
       const { error } = await supabaseClient.auth.signUp({
         email: fakeEmail,
         password,
@@ -205,13 +231,14 @@ authForm.addEventListener("submit", async (e) => {
         options: { data: { display_name: fullName, username } },
       });
       if (error) throw error;
-      // No email confirmation needed since there's no real inbox —
-      // as long as "Confirm email" is off in Supabase, this logs in right away.
+      // The SIGNED_IN event this triggers is handled by onAuthStateChange,
+      // which signs back out and shows the login form — nothing more to do here.
     } else {
       const { error } = await supabaseClient.auth.signInWithPassword({ email: fakeEmail, password });
       if (error) throw error;
     }
   } catch (err) {
+    justSignedUp = false;
     authError.style.color = "#C4574B";
     authError.textContent = err.message.includes("already registered")
       ? "That username is taken."
@@ -266,13 +293,27 @@ async function unsubscribeFromPush() {
 // ---------- Session handling ----------
 supabaseClient.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
+    // With email confirmation off, signUp() above immediately establishes a
+    // session and fires this same SIGNED_IN event — intercept that one case
+    // and sign back out instead of entering the app, so new accounts land on
+    // the login screen instead of being dropped straight into a chat.
+    if (justSignedUp) {
+      justSignedUp = false;
+      const createdUsername = session.user.user_metadata?.username || "";
+      supabaseClient.auth.signOut().then(() => {
+        switchToSignInMode({
+          prefillUsername: createdUsername,
+          message: "Account created — sign in to continue.",
+        });
+      });
+      return;
+    }
     // Supabase re-fires this event (e.g. TOKEN_REFRESHED) whenever the tab
     // regains focus/visibility, not just on real sign-in. Without this guard,
-    // switching back to this tab after opening a media file re-ran the whole
-    // enter flow, which wiped and re-rendered lists *after* scroll-restore
-    // logic had already consumed its saved position, and opened duplicate
-    // realtime/typing channels on every focus. Only run the full init when
-    // this is actually a different/new session.
+    // switching back to this tab after opening a media file would re-run the
+    // whole enter flow and open duplicate realtime/typing channels on every
+    // focus. Only run the full init when this is actually a different/new
+    // session.
     if (currentUser?.id === session.user.id) return;
     currentUser = session.user;
     enterApp();
