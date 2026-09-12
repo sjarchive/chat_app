@@ -348,52 +348,11 @@ input, textarea {
 .chat-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .chat-item-namewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-/* The presence dot reuses the icon buttons' styled tooltip bubble: desktop
-   gets it on hover (grace period included), mobile has no hover so a
-   long-press (~450ms) adds .tip-on via attachTipHold() in script.js, which
-   shows the same bubble immediately. */
-.presence-dot[data-tip] { position: relative; }
-.presence-dot[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%) translateY(-3px);
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 5px 10px;
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 1.25;
-  white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 30;
-  transition: opacity 0.15s ease, transform 0.15s ease,
-              background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-}
-/* Hover path only on devices that actually hover: a touch tap would
-   otherwise leave a sticky :hover state and a tooltip that never leaves.
-   (focus-visible stays outside — a keyboard user tabbing to the dot should
-   get the tooltip regardless of pointer type.) */
-@media (hover: hover) and (pointer: fine) {
-  .presence-dot[data-tip]:hover::after {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-    /* Same grace period as the icon buttons: hover-in waits ~half a second;
-       hover-out uses the base rule's 0 delay. */
-    transition-delay: 0.45s, 0.45s, 0s, 0s, 0s;
-  }
-}
-.presence-dot[data-tip]:focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-/* Long-press path: the 0.45s wait already happened in JS, so show instantly. */
-.presence-dot[data-tip].tip-on::after {
+/* Mobile has no hover: a long-press (~450ms) adds .tip-on via attachTipHold()
+   in script.js to show the same tooltip bubble instantly — the JS wait
+   replaces the hover grace period — and it lingers briefly after the finger
+   lifts so it can actually be read. */
+[data-tip].tip-on::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
