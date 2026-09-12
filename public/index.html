@@ -186,6 +186,14 @@ html, body {
 
 .header-actions { display: flex; align-items: center; gap: 2px; }
 
+/* The chat screen's header now only has the back button + the partner's
+   name (the per-chat theme toggle was removed) — space-between would push
+   the name all the way to the far right with nothing to balance it, so this
+   screen's header left-aligns its two items instead of spreading them. The
+   chats-list screen's header still uses space-between above, since its two
+   items (title, header-actions) are meant to sit at opposite edges. */
+#chat-screen .chat-header { justify-content: flex-start; }
+
 .icon-button {
   background: none;
   border: none;
