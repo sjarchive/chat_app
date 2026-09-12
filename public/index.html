@@ -111,14 +111,20 @@ input, textarea {
   -webkit-touch-callout: default;
 }
 /* Message text stays selectable so users can hold/copy important info.
-   The .meta row (time + ticks) opts back out so a selection that starts on
-   the message text doesn't swallow the timestamp. */
+   The supporting furniture inside a bubble opts back out — a selection
+   starting on the message text must not swallow it:
+   .meta        — the time + tick row
+   .sender-name — the author label above the text
+   .quoted-msg  — the reply preview; to copy the original, tap it to jump
+                  to the source message and select there */
 .bubble {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
 }
-.bubble .meta {
+.bubble .meta,
+.bubble .sender-name,
+.bubble .quoted-msg {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
