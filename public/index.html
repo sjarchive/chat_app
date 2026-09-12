@@ -383,10 +383,19 @@ html, body {
 .mine .quoted-body { color: rgba(255,255,255,0.75); }
 [data-theme="light"] .mine .quoted-body { color: rgba(17,27,33,0.6); }
 
-.msg-row.highlight-flash .bubble { animation: flash 1.2s ease-out; }
+/* Outlined rather than box-shadowed: bubbles already carry their own
+   (theme- and side-dependent) box-shadow, so animating box-shadow would
+   override it and end on "none", making the flash pop differently on
+   mine-vs-theirs bubbles and per theme. An outline draws on top of whatever
+   the bubble has, so the flash looks identical everywhere. */
+.msg-row.highlight-flash .bubble {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  animation: flash 1.2s ease-out;
+}
 @keyframes flash {
-  0% { box-shadow: 0 0 0 2px var(--accent); }
-  100% { box-shadow: none; }
+  0% { outline-color: var(--accent); }
+  100% { outline-color: transparent; }
 }
 
 .reply-preview {
