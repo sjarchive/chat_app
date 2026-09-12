@@ -222,13 +222,12 @@ html, body {
 }
 
 .msg-row { display: flex; margin-bottom: 2px;
-  /* Skips rendering work for rows scrolled out of view. A long conversation
-     only paints the visible bubbles — this is what keeps both the initial
-     render after a refresh and the theme cross-fade cheap as history grows.
-     "auto 44px" lets the browser memoize each row's real height once
-     rendered, so the scrollbar stays accurate. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 44px; }
+  /* content-visibility: auto was previously used here to skip rendering
+     off-screen rows, but its 44px placeholders made the scroll height change
+     on the fly as real heights registered mid-scroll — the scrollbar jumped
+     and content shifted under the finger on first pass through history.
+     History is capped at 200 messages, so rendering everything up front is
+     affordable and makes the scrollbar exact from the first paint. */ }
 .msg-row.grouped { margin-bottom: 2px; }
 .msg-row.group-start { margin-top: 10px; }
 .msg-row.mine { justify-content: flex-end; }
