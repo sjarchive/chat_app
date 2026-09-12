@@ -346,7 +346,6 @@ input, textarea {
   flex-shrink: 0;
 }
 .chat-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.chat-item-namewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* Mobile has no hover: a long-press (~450ms) adds .tip-on via attachTipHold()
    in script.js to show the same tooltip bubble instantly — the JS wait
@@ -355,6 +354,20 @@ input, textarea {
 [data-tip].tip-on::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* Dots pinned to a row's right edge (chats list) anchor the bubble to the
+   same edge: centering it under the dot would push most of the bubble past
+   the screen edge, where the scroll container clips it. */
+[data-tip].tip-edge::after {
+  left: auto;
+  right: 0;
+  transform: translateY(-3px);
+}
+[data-tip].tip-edge:hover::after,
+[data-tip].tip-edge:focus-visible::after,
+[data-tip].tip-edge.tip-on::after {
+  transform: translateY(0);
 }
 
 .message-list {
@@ -1010,8 +1023,8 @@ input, textarea {
       </button>
       <div class="chat-header-info">
         <div class="chat-title-row">
-          <span id="partner-presence" class="presence-dot hidden" data-tip="Online" role="img" aria-label="Online"></span>
           <span class="chat-title" id="chat-partner-name">…</span>
+          <span id="partner-presence" class="presence-dot hidden" data-tip="Online" role="img" aria-label="Online"></span>
         </div>
         <span class="chat-sub hidden" id="typing-indicator"></span>
       </div>

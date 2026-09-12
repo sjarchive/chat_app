@@ -858,19 +858,13 @@ function renderChatList() {
 
     const top = document.createElement("div");
     top.className = "chat-item-top";
-    // Online dot rides in front of the name; the wrapper keeps name + dot
-    // grouped (a bare extra child would be pushed apart by space-between).
-    const nameWrap = document.createElement("span");
-    nameWrap.className = "chat-item-namewrap";
-    if (onlineUsers.has(partner)) nameWrap.appendChild(makePresenceDot());
     const name = document.createElement("span");
     name.className = "chat-item-name";
     name.textContent = profileCache[partner] || "Someone";
-    nameWrap.appendChild(name);
     const time = document.createElement("span");
     time.className = "chat-item-time";
     time.textContent = timeLabel(s.last.created_at);
-    top.appendChild(nameWrap);
+    top.appendChild(name);
     top.appendChild(time);
 
     const bottom = document.createElement("div");
@@ -898,6 +892,15 @@ function renderChatList() {
     info.appendChild(top);
     info.appendChild(bottom);
     item.appendChild(info);
+    // Online dot pinned to the row's right edge, vertically centered by the
+    // item's flex alignment — reads as a status flag on the row rather than
+    // part of the name. tip-edge anchors its tooltip to the same edge so the
+    // bubble can't overflow the screen.
+    if (onlineUsers.has(partner)) {
+      const dot = makePresenceDot();
+      dot.classList.add("tip-edge");
+      item.appendChild(dot);
+    }
     item.addEventListener("click", () => openConversation(partner));
     item.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
