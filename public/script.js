@@ -41,6 +41,34 @@ const composerError = document.getElementById("composer-error");
 
 let isSignUpMode = false;
 
+// ---------- Fade in / fade out ----------
+// Toggling .hidden alone can't animate: display:none isn't transitional.
+// hideEl() keeps the element rendered under .fade-out (see the CSS block in
+// index.html) and swaps in .hidden when the transition is done; showEl()
+// reveals it with .fade-out pre-applied, then removes it so the element
+// transitions in from transparent. A per-element timer (cleared on the
+// opposite call) keeps rapid show/hide/show sequences from fighting each
+// other with a stale timeout.
+const FADE_MS = 200; // matches the 0.18s CSS transitions, plus a frame
+
+function showEl(el) {
+  clearTimeout(el._fadeTimer);
+  el.classList.add("fade-out");
+  el.classList.remove("hidden");
+  void el.offsetWidth; // flush so the transition runs from transparent
+  el.classList.remove("fade-out");
+}
+
+function hideEl(el) {
+  if (el.classList.contains("hidden")) return;
+  clearTimeout(el._fadeTimer);
+  el.classList.add("fade-out");
+  el._fadeTimer = setTimeout(() => {
+    el.classList.add("hidden");
+    el.classList.remove("fade-out");
+  }, FADE_MS);
+}
+
 let currentUser = null;
 let profileCache = {}; // id -> display_name (usernames are looked up ad-hoc for search)
 let messageCache = {}; // id -> full message row, so replies can show a quote
@@ -325,9 +353,9 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
     // subscribeToPush to run again if they sign back in this session.
     pushSubscribedForUser = null;
     document.documentElement.classList.remove("has-session");
-    authScreen.classList.remove("hidden");
-    chatsScreen.classList.add("hidden");
-    chatScreen.classList.add("hidden");
+    showEl(authScreen);
+    hideEl(chatsScreen);
+    hideEl(chatScreen);
     setAppHeight();
   }
 });
@@ -395,7 +423,7 @@ function enterApp() {
   // otherwise those overrides keep outranking every future .hidden toggle.
   document.documentElement.classList.remove("has-session");
   document.documentElement.classList.remove("has-open-chat");
-  authScreen.classList.add("hidden");
+  hideEl(authScreen);
   setAppHeight();
 
   // If a conversation was still open the last time this tab loaded (e.g. the
@@ -474,8 +502,8 @@ async function openConversation(partnerId, replace = false) {
   // here on (markConversationSeen persists this in the database).
   if (chatSummaries[partnerId]) chatSummaries[partnerId].unread = 0;
 
-  chatsScreen.classList.add("hidden");
-  chatScreen.classList.remove("hidden");
+  hideEl(chatsScreen);
+  showEl(chatScreen);
   setAppHeight();
   if (!profileCache[partnerId]) {
     ensureProfileCached(partnerId).then((name) => {
@@ -504,14 +532,14 @@ function closeConversation() {
     typingChannel = null;
   }
   Object.keys(activeTypers).forEach(clearTyping);
-  chatScreen.classList.add("hidden");
+  hideEl(chatScreen);
   currentPartner = null;
   clearStoredOpenChat();
 }
 
 async function goBackToChats() {
   closeConversation();
-  chatsScreen.classList.remove("hidden");
+  showEl(chatsScreen);
   setAppHeight();
   // Paint immediately from the summaries we already hold (kept up to date by
   // the realtime handlers and optimistic sends) instead of blocking on a
@@ -727,12 +755,15 @@ async function runUserSearch(term) {
       searchResults.appendChild(row);
     }
   }
-  searchResults.classList.remove("hidden");
+  showEl(searchResults);
 }
 
 function hideSearchResults() {
-  searchResults.classList.add("hidden");
-  searchResults.innerHTML = "";
+  // Content is dropped once the fade-out finishes, not immediately —
+  // clearing now would collapse the box mid-animation.
+  clearTimeout(searchResults._fadeTimer);
+  hideEl(searchResults);
+  searchResults._fadeTimer = setTimeout(() => { searchResults.innerHTML = ""; }, FADE_MS);
 }
 
 // Dismiss search results when tapping elsewhere on the chats screen
@@ -838,12 +869,12 @@ function openSettings() {
     currentUser?.user_metadata?.display_name ||
     "";
   settingsError.textContent = "";
-  settingsOverlay.classList.remove("hidden");
+  showEl(settingsOverlay);
   settingsName.focus();
 }
 
 function closeSettings() {
-  settingsOverlay.classList.add("hidden");
+  hideEl(settingsOverlay);
 }
 
 settingsButtons.forEach((button) => {
@@ -859,7 +890,6 @@ settingsOverlay.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !settingsOverlay.classList.contains("hidden")) closeSettings();
 });
-
 settingsName.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
@@ -1131,8 +1161,7 @@ function clearTyping(userId) {
 function renderTypingIndicator() {
   const names = Object.values(activeTypers);
   if (names.length === 0) {
-    typingIndicator.classList.add("hidden");
-    typingIndicator.textContent = "";
+    hideEl(typingIndicator);
     return;
   }
   const text =
@@ -1142,7 +1171,7 @@ function renderTypingIndicator() {
       ? `${names[0]} and ${names[1]} are typing…`
       : `${names.length} people are typing…`;
   typingIndicator.textContent = text;
-  typingIndicator.classList.remove("hidden");
+  showEl(typingIndicator);
 }
 
 // ---------- Day dividers ----------
@@ -1439,13 +1468,13 @@ function startReply(msg) {
   replyingTo = msg;
   replyPreviewName.textContent = msg.sender_id === currentUser?.id ? "You" : profileCache[msg.sender_id] || "Someone";
   replyPreviewText.textContent = msg.body ? truncate(msg.body, 80) : msg.media_path ? "📷 Photo" : "";
-  replyPreview.classList.remove("hidden");
+  showEl(replyPreview);
   messageInput.focus();
 }
 
 function cancelReply() {
   replyingTo = null;
-  replyPreview.classList.add("hidden");
+  hideEl(replyPreview);
 }
 
 replyPreviewCancel.addEventListener("click", cancelReply);
@@ -1467,7 +1496,7 @@ function updateJumpBottom() {
   const shouldShow = !isNearBottom();
   if (shouldShow !== jumpBottomVisible) {
     jumpBottomVisible = shouldShow;
-    jumpBottom.classList.toggle("hidden", !shouldShow);
+    shouldShow ? showEl(jumpBottom) : hideEl(jumpBottom);
   }
   if (shouldShow) {
     const count = unseenWhileScrolledUp > 0 ? unseenWhileScrolledUp : "";
@@ -1499,7 +1528,7 @@ jumpBottom.addEventListener("click", () => {
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   unseenWhileScrolledUp = 0;
   jumpBottomVisible = false;
-  jumpBottom.classList.add("hidden");
+  hideEl(jumpBottom);
 });
 
 
@@ -1519,15 +1548,18 @@ let composerErrorTimer = null;
 
 function showComposerError(text) {
   composerError.textContent = text;
-  composerError.classList.remove("hidden");
+  showEl(composerError);
   clearTimeout(composerErrorTimer);
   composerErrorTimer = setTimeout(hideComposerError, 6000);
 }
 
 function hideComposerError() {
-  composerError.classList.add("hidden");
-  composerError.textContent = "";
+  // Text is dropped when the fade-out finishes, not immediately, so the
+  // banner doesn't collapse mid-animation.
+  hideEl(composerError);
   clearTimeout(composerErrorTimer);
+  clearTimeout(composerError._fadeTimer);
+  composerError._fadeTimer = setTimeout(() => { composerError.textContent = ""; }, FADE_MS);
 }
 
 // ---------- Sending ----------

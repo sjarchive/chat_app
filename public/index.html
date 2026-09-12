@@ -119,6 +119,36 @@ html, body {
 .hidden { display: none !important; }
 .hidden-field { display: none; }
 
+/* ---------- Fade in / fade out ----------
+   JS's showEl()/hideEl() drive these: hideEl() adds .fade-out (opacity
+   transition runs while the element is still rendered), then swaps in
+   .hidden once it completes; showEl() reveals with .fade-out pre-applied
+   and removes it next frame so the element transitions in. */
+/* background/color kept from the universal theme cross-fade rule, which this
+   more specific transition property list would otherwise override. */
+.screen { transition: opacity 0.18s ease, background-color 0.3s ease, color 0.3s ease; }
+/* Screens live in normal flow, so during a cross-fade the outgoing one must
+   overlay instead of stacking (two 100dvh blocks would double the page
+   height). Fixed + inset:0 lifts it out of flow for the fade's duration. */
+.screen.fade-out { position: fixed; inset: 0; z-index: 50; }
+
+.search-results,
+.settings-overlay,
+.reply-preview,
+.composer-error,
+.typing-indicator {
+  transition: opacity 0.18s ease, transform 0.18s ease,
+              background-color 0.3s ease, border-color 0.3s ease;
+}
+.fade-out { opacity: 0 !important; pointer-events: none; }
+/* Popovers settle upward/outward when appearing, reverse when leaving. */
+.search-results.fade-out { transform: translateY(-6px); }
+.settings-overlay.fade-out { transform: scale(0.98); }
+.reply-preview.fade-out { transform: translateY(100%); }
+.composer-error.fade-out { transform: translateY(100%); }
+.jump-bottom { transition: opacity 0.18s ease, transform 0.18s ease, filter 0.15s ease, background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
+.jump-bottom.fade-out { transform: translateY(8px); }
+
 .screen { height: 100dvh; height: calc(var(--app-height, 100dvh)); display: flex; flex-direction: column; position: relative; transform: translateY(var(--app-offset-top, 0px)); }
 
 /* ---------- Auth ---------- */
