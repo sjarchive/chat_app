@@ -1208,10 +1208,17 @@ function attachSwipeToReply(row, bubble, replyBtn, msg, mine) {
     replyBtn.style.width = "0px";
     replyBtn.style.padding = "0px";
     replyBtn.style.opacity = "0";
+    // Restore the bubble's theme cross-fade regardless of mine/theirs —
+    // touchstart above blanks it out for every row it's touched (not just
+    // ones actually swiped), and leaving it unset here meant "mine" bubbles,
+    // which never got an explicit transform reset, stayed stuck without a
+    // theme transition for the rest of the session.
+    bubble.style.transition = mine
+      ? "background-color 0.3s ease, color 0.3s ease"
+      : "transform 0.18s ease, background-color 0.3s ease, color 0.3s ease";
     if (!mine) {
       // Same reasoning as replyBtn above: inline transition overrides the
       // universal theme transition, so include the theme properties here too.
-      bubble.style.transition = "transform 0.18s ease, background-color 0.3s ease, color 0.3s ease";
       bubble.style.transform = "translateX(0)";
       replyBtn.style.transition += ", transform 0.18s ease";
       replyBtn.style.transform = "translateX(0)";
