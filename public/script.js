@@ -412,6 +412,31 @@ function clearStoredOpenChat() {
   } catch (e) {}
 }
 
+// ---------- Remember each conversation's last scroll position ----------
+// Reopening a chat (or refreshing while inside it) should land exactly where
+// the user left it, not at the newest message and not at some arbitrary spot.
+// "bottom" is stored as a sentinel rather than a pixel offset, because pixel
+// offsets drift as new messages/images change the list height — near-bottom
+// always means "show the latest".
+function savedScrollKey(partnerId) {
+  return `circle-chat-scroll:${partnerId}`;
+}
+
+function getSavedScroll(partnerId) {
+  try {
+    const v = sessionStorage.getItem(savedScrollKey(partnerId));
+    return v === null ? null : v;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveScrollPosition(partnerId, top, nearBottom) {
+  try {
+    sessionStorage.setItem(savedScrollKey(partnerId), nearBottom ? "bottom" : String(top));
+  } catch (e) {}
+}
+
 // ---------- Conversation navigation ----------
 async function openConversation(partnerId) {
   currentPartner = partnerId;
@@ -669,16 +694,57 @@ async function loadMessages() {
   if (error) return console.error(error);
   renderAllMessages(data);
 
-  // Normally open the chat at the newest message. If the user just opened a
-  // file from an older message, restore that exact message instead.
+  // Normally open the chat where the user last left it (or the newest
+  // message if they were at the bottom). If the user just opened a file from
+  // an older message, restore that exact message instead.
   const returnState = getReturnState();
   pendingRestoreMessageId = returnState.id;
   pendingRestoreScrollTop = returnState.scrollTop;
   if (!restoreReturnMessagePosition()) {
-    scrollToBottom();
+    const saved = getSavedScroll(currentPartner);
+    applyInitialScroll(saved !== null && saved !== "bottom" ? Number(saved) : "bottom");
   }
   updateJumpBottom();
 }
+
+// Scrolls the freshly opened chat to its target position, then re-asserts it
+// over the next few hundred milliseconds. The re-assertion is the important
+// part: off-screen message rows (content-visibility) initially lay out at an
+// estimated height and only adopt their real height once rendered, so the
+// list's scrollHeight keeps shifting right after the jump — a single
+// scrollTop assignment lands at a seemingly random spot in history. Re-applying
+// after each settling pass keeps the viewport pinned until layout is stable.
+// Any real user scroll input cancels the re-assertion so it never fights the
+// reader.
+let initialScrollCancelled = false;
+
+function applyInitialScroll(target) {
+  initialScrollCancelled = false;
+  const apply = () => {
+    if (initialScrollCancelled) return;
+    if (target === "bottom") {
+      scrollToBottom();
+    } else {
+      messageList.scrollTop = target;
+      updateJumpBottom();
+    }
+  };
+  apply();
+  requestAnimationFrame(apply);
+  setTimeout(apply, 150);
+  setTimeout(apply, 400);
+  setTimeout(apply, 700);
+}
+
+["wheel", "touchstart", "keydown"].forEach((ev) => {
+  messageList.addEventListener(
+    ev,
+    () => {
+      initialScrollCancelled = true;
+    },
+    { passive: true }
+  );
+});
 
 function renderAllMessages(data) {
   // Batch render of existing history: no per-row entry animation (see the
@@ -1361,11 +1427,22 @@ function updateJumpBottom() {
   jumpBottom.classList.remove("hidden");
 }
 
+let saveScrollTimer = null;
 messageList.addEventListener("scroll", () => {
   if (isNearBottom() && unseenWhileScrolledUp > 0) {
     unseenWhileScrolledUp = 0;
   }
   updateJumpBottom();
+
+  // Persist where the reader is in this conversation (debounced — scroll
+  // events fire continuously), so reopening/refreshing returns here.
+  if (currentPartner) {
+    clearTimeout(saveScrollTimer);
+    const partner = currentPartner;
+    const top = messageList.scrollTop;
+    const nearBottom = isNearBottom();
+    saveScrollTimer = setTimeout(() => saveScrollPosition(partner, top, nearBottom), 150);
+  }
 });
 
 jumpBottom.addEventListener("click", () => {
