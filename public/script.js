@@ -288,6 +288,7 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
     // Sign-out removed this user's push subscription rows, so allow
     // subscribeToPush to run again if they sign back in this session.
     pushSubscribedForUser = null;
+    document.documentElement.classList.remove("has-session");
     authScreen.classList.remove("hidden");
     chatsScreen.classList.add("hidden");
     chatScreen.classList.add("hidden");
@@ -349,6 +350,14 @@ function subscribeProfiles() {
 }
 
 function enterApp() {
+  // The flash-prevention "has-session" class (set in <head>, before this
+  // real auth check ran) has a CSS override that force-shows #chats-screen
+  // even while it carries the "hidden" class, specifically so it's visible
+  // during that brief pre-JS window on a refresh. Once we're here, real
+  // classList toggling takes over for the rest of the session — so drop it,
+  // otherwise that override keeps outranking every future .hidden toggle
+  // and the chats list never actually hides again when a chat is opened.
+  document.documentElement.classList.remove("has-session");
   authScreen.classList.add("hidden");
   chatScreen.classList.add("hidden");
   chatsScreen.classList.remove("hidden");
