@@ -204,7 +204,10 @@ authForm.addEventListener("submit", async (e) => {
         password,
         // display_name drives what shows on message bubbles / typing indicator —
         // that should be the person's name, not their (login-only) username.
-        options: { data: { display_name: fullName } },
+        // username is also passed through so the handle_new_user() DB trigger
+        // can use it directly instead of having to parse it back out of the
+        // fake email address.
+        options: { data: { display_name: fullName, username } },
       });
       if (error) throw error;
       // No email confirmation needed since there's no real inbox —
