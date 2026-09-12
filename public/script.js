@@ -657,7 +657,9 @@ function timeLabel(iso) {
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // hour12 forces AM/PM everywhere — a bare toLocaleTimeString follows the
+  // device's locale/clock setting, which renders 24-hour on many phones.
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
@@ -1427,7 +1429,7 @@ function renderMessage(msg) {
   const meta = document.createElement("span");
   meta.className = "meta";
   const timeText = document.createElement("span");
-  timeText.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  timeText.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
   meta.appendChild(timeText);
   if (mine) {
     const tick = document.createElement("span");
