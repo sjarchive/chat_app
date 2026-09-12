@@ -864,8 +864,19 @@ function renderChatList() {
     const time = document.createElement("span");
     time.className = "chat-item-time";
     time.textContent = timeLabel(s.last.created_at);
+    // The online dot lives on the timestamp line, right of the time — the
+    // top-right corner stays one aligned group instead of the dot floating
+    // beside the info block at a different height than the time.
+    const right = document.createElement("span");
+    right.className = "chat-item-right";
+    right.appendChild(time);
+    if (onlineUsers.has(partner)) {
+      const dot = makePresenceDot();
+      dot.classList.add("tip-edge");
+      right.appendChild(dot);
+    }
     top.appendChild(name);
-    top.appendChild(time);
+    top.appendChild(right);
 
     const bottom = document.createElement("div");
     bottom.className = "chat-item-bottom";
@@ -892,15 +903,6 @@ function renderChatList() {
     info.appendChild(top);
     info.appendChild(bottom);
     item.appendChild(info);
-    // Online dot pinned to the row's right edge, vertically centered by the
-    // item's flex alignment — reads as a status flag on the row rather than
-    // part of the name. tip-edge anchors its tooltip to the same edge so the
-    // bubble can't overflow the screen.
-    if (onlineUsers.has(partner)) {
-      const dot = makePresenceDot();
-      dot.classList.add("tip-edge");
-      item.appendChild(dot);
-    }
     item.addEventListener("click", () => openConversation(partner));
     item.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
