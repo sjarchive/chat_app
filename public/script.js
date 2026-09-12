@@ -216,6 +216,12 @@ function validatePassword(password) {
 // instead, so new users land on the login screen like everyone else.
 let justSignedUp = false;
 
+// The login password, stashed by the auth form and consumed once by
+// enterApp → CircleCrypto.setupKeys() to unlock/create this device's
+// encryption key. Never persisted — after the first login on a device the
+// key itself is cached in localStorage and refreshes need no password.
+let pendingPassword = null;
+
 authForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   authError.textContent = "";
@@ -265,8 +271,14 @@ authForm.addEventListener("submit", async (e) => {
       // The SIGNED_IN event this triggers is handled by onAuthStateChange,
       // which signs back out and shows the login form — nothing more to do here.
     } else {
+      // Set before the call: the SIGNED_IN event (and thus enterApp) can fire
+      // before signInWithPassword's promise resolves.
+      pendingPassword = password;
       const { error } = await supabaseClient.auth.signInWithPassword({ email: fakeEmail, password });
-      if (error) throw error;
+      if (error) {
+        pendingPassword = null;
+        throw error;
+      }
     }
   } catch (err) {
     justSignedUp = false;
@@ -462,7 +474,7 @@ async function handleProfileDeleted(id) {
   if (!chatsScreen.classList.contains("hidden")) renderChatList();
 }
 
-function enterApp() {
+async function enterApp() {
   // The flash-prevention "has-session"/"has-open-chat" classes (set in
   // <head>, before this real auth check ran) have CSS overrides that
   // force-show #chats-screen or #chat-screen even while they carry the
@@ -474,6 +486,17 @@ function enterApp() {
   document.documentElement.classList.remove("has-open-chat");
   hideEl(authScreen);
   setAppHeight();
+
+  // Unlock (or first-time create) this device's encryption key before any
+  // message can render — the login password is only in hand on an active
+  // sign-in; afterwards the key is cached locally and this is instant.
+  const keysReady = await CircleCrypto.setupKeys(currentUser.id, pendingPassword);
+  pendingPassword = null;
+  if (!keysReady) {
+    console.warn(
+      "Encryption key unavailable — messages will be sent unencrypted and encrypted ones can't be read until you sign out and back in."
+    );
+  }
 
   // If a conversation was still open the last time this tab loaded (e.g. the
   // user refreshed the page), reopen it instead of dropping back to the
@@ -617,11 +640,34 @@ window.addEventListener("popstate", (e) => {
   }
 });
 
+// ---------- Header name: tap must not select, hold must ----------
+// On mobile, a tap on the partner's name whose finger drifts a few pixels (or
+// a quick double-tap) makes the browser run its text-selection drag and leave
+// a blue ::selection box over the name. Selection there should only ever come
+// from a deliberate hold, so when the touch that just ended was short,
+// collapse whatever selection it produced. Touches that lasted past the
+// long-press threshold are left alone, so hold-to-select keeps working.
+const HOLD_SELECT_MS = 400; // Android/iOS select on holds of roughly 500ms
+let nameTouchStartedAt = 0;
+chatPartnerName.addEventListener("touchstart", () => {
+  nameTouchStartedAt = Date.now();
+}, { passive: true });
+chatPartnerName.addEventListener("touchend", () => {
+  if (Date.now() - nameTouchStartedAt >= HOLD_SELECT_MS) return;
+  // The highlight is painted at touch-up, after this handler runs, so
+  // collapsing synchronously could miss it — wait a beat instead.
+  setTimeout(() => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) sel.removeAllRanges();
+  }, 50);
+}, { passive: true });
+
 // ---------- Profiles ----------
 async function loadProfiles() {
-  const { data, error } = await supabaseClient.from("profiles").select("id, display_name");
+  const { data, error } = await supabaseClient.from("profiles").select("id, display_name, public_key");
   if (error) return console.error(error);
   profileCache = Object.fromEntries(data.map((p) => [p.id, p.display_name]));
+  data.forEach((p) => CircleCrypto.cachePublicKey(p.id, p.public_key));
 }
 
 // ---------- Chats list ----------
@@ -644,7 +690,22 @@ async function loadChatSummaries() {
     if (!s.last) s.last = msg;
     if (msg.recipient_id === currentUser.id && !msg.seen_at) s.unread++;
   }
+  // Last messages of conversations can be encrypted — resolve each preview
+  // (instant no-op for legacy plaintext rows) before painting the list.
+  await Promise.all(Object.values(chatSummaries).map(setSummaryPreview));
   renderChatList();
+}
+
+// Resolves a conversation's chats-list preview text from its last message
+// (decrypting it when needed) into s.preview.
+async function setSummaryPreview(s) {
+  if (!s.last) return;
+  try {
+    const view = await CircleCrypto.decryptRow(s.last);
+    s.preview = previewText(view);
+  } catch (e) {
+    s.preview = "";
+  }
 }
 
 function previewText(msg) {
@@ -673,7 +734,10 @@ function renderChatList() {
     (a, b) => new Date(chatSummaries[b].last.created_at) - new Date(chatSummaries[a].last.created_at)
   );
   const signature = partners
-    .map((p) => `${p}:${chatSummaries[p].last?.id}:${chatSummaries[p].unread}:${profileCache[p] ?? ""}`)
+    .map(
+      (p) =>
+        `${p}:${chatSummaries[p].last?.id}:${chatSummaries[p].unread}:${profileCache[p] ?? ""}:${chatSummaries[p].preview ?? ""}`
+    )
     .join("|");
   if (signature === lastChatListSignature) return;
   lastChatListSignature = signature;
@@ -722,7 +786,7 @@ function renderChatList() {
       tick.textContent = s.last.seen_at ? "✓✓" : "✓";
       preview.appendChild(tick);
     }
-    preview.appendChild(document.createTextNode(previewText(s.last)));
+    preview.appendChild(document.createTextNode(s.preview != null ? s.preview : previewText(s.last)));
     bottom.appendChild(preview);
     if (s.unread > 0) {
       const badge = document.createElement("span");
@@ -750,7 +814,15 @@ function renderChatList() {
 function updateChatSummaryFor(msg) {
   const partner = msg.sender_id === currentUser.id ? msg.recipient_id : msg.sender_id;
   const s = (chatSummaries[partner] ||= { last: null, unread: 0 });
-  if (!s.last || new Date(msg.created_at) >= new Date(s.last.created_at)) s.last = msg;
+  if (!s.last || new Date(msg.created_at) >= new Date(s.last.created_at)) {
+    s.last = msg;
+    // Blank placeholder while the preview decrypts (near-instant for
+    // plaintext); setSummaryPreview re-renders with the real text.
+    s.preview = "";
+    setSummaryPreview(s).then(() => {
+      if (!chatsScreen.classList.contains("hidden")) renderChatList();
+    });
+  }
   if (msg.recipient_id === currentUser.id && !msg.seen_at && currentPartner !== partner) s.unread++;
   // A brand-new contact's first message would otherwise sit as "Someone"
   // until the next full reload — pull the name and repaint the row with it.
@@ -783,7 +855,7 @@ userSearch.addEventListener("input", () => {
 async function runUserSearch(term) {
   const { data, error } = await supabaseClient
     .from("profiles")
-    .select("id, display_name, username")
+    .select("id, display_name, username, public_key")
     .eq("username", term)
     .neq("id", currentUser.id)
     .limit(10);
@@ -798,6 +870,7 @@ async function runUserSearch(term) {
   } else {
     for (const p of data) {
       profileCache[p.id] = p.display_name;
+      CircleCrypto.cachePublicKey(p.id, p.public_key);
       const row = document.createElement("div");
       row.className = "search-result";
       row.setAttribute("role", "button");
@@ -879,7 +952,7 @@ async function loadMessages(includeMessageId = null) {
   // The targeted message may be much older than the normal history window, so
   // sort after adding it to keep the chronological message order intact.
   messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  renderAllMessages(messages);
+  await renderAllMessages(messages);
 
   // Always open the conversation at the newest message. scrollTop is set
   // directly (no smooth scroll), so the latest message is simply what's on
@@ -901,13 +974,18 @@ async function loadMessages(includeMessageId = null) {
   updateJumpBottom();
 }
 
-function renderAllMessages(data) {
+async function renderAllMessages(data) {
+  // Decrypt every row first (no-op for legacy plaintext rows) so rows render
+  // in order with plaintext bodies, and messageCache holds decrypted views
+  // for later quotes. Encrypted photos start downloading/decrypting inside
+  // renderMessage; the row itself is placed synchronously here.
+  const views = await Promise.all(data.map((row) => CircleCrypto.decryptRow(row)));
   // Batch render of existing history: no per-row entry animation (see the
   // .animate-in rule in index.html) — otherwise the whole list visibly
   // flickers up whenever it re-renders after a refresh.
   suppressEntryAnimation = true;
   clearMessageList();
-  data.forEach(renderMessage);
+  views.forEach(renderMessage);
   suppressEntryAnimation = false;
 }
 
@@ -1028,7 +1106,7 @@ async function refreshMessageNames() {
     .limit(200);
   if (error) return console.error(error);
   const scrollTop = messageList.scrollTop;
-  renderAllMessages(data.reverse());
+  await renderAllMessages(data.reverse());
   messageList.scrollTop = Math.min(scrollTop, messageList.scrollHeight);
 }
 
@@ -1081,11 +1159,12 @@ async function ensureProfileCached(id) {
   if (profileCache[id]) return profileCache[id];
   const { data, error } = await supabaseClient
     .from("profiles")
-    .select("id, display_name")
+    .select("id, display_name, public_key")
     .eq("id", id)
     .single();
   if (error || !data) return null;
   profileCache[id] = data.display_name;
+  CircleCrypto.cachePublicKey(id, data.public_key);
   return data.display_name;
 }
 
@@ -1099,7 +1178,9 @@ function buildMessagesChannel() {
         const msg = payload.new;
         // RLS means we only ever see rows we're sender or recipient of.
         if (msg.sender_id !== currentUser.id && msg.recipient_id !== currentUser.id) return;
-        handleIncomingMessage(msg);
+        // Encrypted rows are decrypted into a "view" before anything renders
+        // or is cached (legacy plaintext rows pass through untouched).
+        handleIncomingMessage(await CircleCrypto.decryptRow(msg));
       }
     )
     // Read receipts: the recipient marking my messages seen flips my
@@ -1393,7 +1474,6 @@ function renderMessage(msg) {
     if ((msg.media_type || "").startsWith("image/")) {
       const img = document.createElement("img");
       img.className = "media";
-      img.src = mediaUrl;
       img.alt = "Photo";
       // The initial auto-scroll only has a short fixed window to correct for
       // layout shifts (see loadMessages). A photo that finishes loading after
@@ -1402,8 +1482,23 @@ function renderMessage(msg) {
       // has no time limit, so it always catches up, however slow the load.
       img.addEventListener("load", () => { if (isNearBottom()) scrollToBottom(); });
       img.addEventListener("error", () => { if (isNearBottom()) scrollToBottom(); });
+      // Encrypted photos: fetch + decrypt asynchronously, then fill in src
+      // (the URL on its own is just ciphertext). The click opens the
+      // decrypted blob when we have one, the ciphertext file otherwise.
+      if (msg._mk) {
+        CircleCrypto.decryptMedia(msg.media_path, msg._mk, msg._mi, msg.media_type).then((url) => {
+          if (url) {
+            img.src = url;
+            msg._blobUrl = url;
+          } else {
+            img.alt = "Photo unavailable";
+          }
+        });
+      } else {
+        img.src = mediaUrl;
+      }
       img.addEventListener("click", () => {
-        window.open(mediaUrl, "_blank", "noopener,noreferrer");
+        window.open(msg._blobUrl || mediaUrl, "_blank", "noopener,noreferrer");
       });
       bubble.appendChild(img);
     } else {
@@ -1416,6 +1511,15 @@ function renderMessage(msg) {
       link.target = "_blank";
       link.rel = "noopener,noreferrer";
       link.textContent = "📎 Attachment";
+      if (msg._mk) {
+        link.textContent = "🔒 Attachment";
+        CircleCrypto.decryptMedia(msg.media_path, msg._mk, msg._mi, msg.media_type).then((url) => {
+          if (url) {
+            link.href = url;
+            msg._blobUrl = url;
+          }
+        });
+      }
       bubble.appendChild(link);
     }
   }
@@ -1814,9 +1918,29 @@ composer.addEventListener("submit", async (e) => {
   // so going back shows the new message without waiting on any fetch.
   updateChatSummaryFor(optimisticMsg);
 
+  // E2EE: lock the message to the partner's key (plus our own other devices)
+  // before it leaves the device. Falls back to plaintext when the partner
+  // has no published key yet (account created before E2EE, or signed up but
+  // never signed in) so nothing gets lost — those rows just aren't secret.
+  let rowBody = text;
+  let notify = null;
+  if (CircleCrypto.ready()) {
+    const enc = await CircleCrypto.encryptOutgoing(currentPartner, { b: text, mk: null, mi: null }, text);
+    if (enc) {
+      rowBody = enc.body;
+      notify = enc.notify;
+    }
+  }
+
   const { data, error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, body: text, reply_to: replyId })
+    .insert({
+      sender_id: currentUser.id,
+      recipient_id: currentPartner,
+      body: rowBody,
+      reply_to: replyId,
+      ...(notify ? { notify } : {}),
+    })
     .select()
     .single();
   if (error) {
@@ -1829,6 +1953,10 @@ composer.addEventListener("submit", async (e) => {
     showComposerError("Couldn't send — check your connection and try again.");
   } else {
     resolvePendingMessage(optimisticMsg, data);
+    // data.body is the stored ciphertext; the in-memory view keeps the
+    // plaintext we already rendered (same object reference, so anything
+    // holding it — quotes, reply preview — sees readable text).
+    optimisticMsg.body = text;
     // The optimistic entry above used a client timestamp; now that the real
     // row is back (with its server id/created_at), refresh the preview from it.
     updateChatSummaryFor(optimisticMsg);
@@ -1919,18 +2047,48 @@ attachInput.addEventListener("change", async () => {
 
   const replyId = replyingTo?.id || null;
   const path = `${currentUser.id}/${Date.now()}-${upload.name}`;
+  // E2EE: encrypt the image bytes with a one-off AES key before upload —
+  // Storage only ever holds ciphertext. The key travels inside the encrypted
+  // message payload below.
+  let uploadData = upload;
+  let mk = null;
+  let mi = null;
+  if (CircleCrypto.ready()) {
+    const enc = await CircleCrypto.encryptFileForSend(upload);
+    uploadData = enc.data;
+    mk = enc.mk;
+    mi = enc.mi;
+  }
   const { error: uploadError } = await supabaseClient.storage
     .from("chat-media")
-    .upload(path, upload);
+    .upload(path, uploadData);
   if (uploadError) {
     console.error(uploadError);
     showComposerError("Couldn't upload the image — check your connection and try again.");
     return; // no message row was created, so the reply context can stay put
   }
 
+  let rowBody = null;
+  let notify = null;
+  if (CircleCrypto.ready() && mk) {
+    const enc = await CircleCrypto.encryptOutgoing(currentPartner, { b: null, mk, mi }, "📷 Photo");
+    if (enc) {
+      rowBody = enc.body;
+      notify = enc.notify;
+    }
+  }
+
   const { error } = await supabaseClient
     .from("messages")
-    .insert({ sender_id: currentUser.id, recipient_id: currentPartner, media_path: path, media_type: upload.type, reply_to: replyId });
+    .insert({
+      sender_id: currentUser.id,
+      recipient_id: currentPartner,
+      body: rowBody,
+      media_path: path,
+      media_type: upload.type,
+      reply_to: replyId,
+      ...(notify ? { notify } : {}),
+    });
   if (error) {
     console.error(error);
     showComposerError("The image uploaded, but the message couldn't be sent. Try attaching it again.");
