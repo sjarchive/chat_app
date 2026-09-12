@@ -97,7 +97,12 @@ html, body {
 @media (prefers-reduced-motion: no-preference) {
   * {
     transition: background-color 0.3s ease, color 0.3s ease,
-                border-color 0.3s ease, box-shadow 0.3s ease;
+                border-color 0.3s ease;
+    /* box-shadow deliberately NOT transitioned: in light theme every message
+       bubble carries a box-shadow, so animating it re-renders (not just
+       repaints) hundreds of bubbles per frame inside a long conversation —
+       that's what made the toggle stutter on the chat screen. The shadow
+       now swaps instantly instead of fading, which is imperceptible. */
   }
   html, body { transition: background-color 0.3s ease, color 0.3s ease; }
 }
@@ -193,7 +198,14 @@ html, body {
   position: relative;
 }
 
-.msg-row { display: flex; margin-bottom: 2px; }
+.msg-row { display: flex; margin-bottom: 2px;
+  /* Skips rendering work for rows scrolled out of view. A long conversation
+     only paints the visible bubbles — this is what keeps both the initial
+     render after a refresh and the theme cross-fade cheap as history grows.
+     "auto 44px" lets the browser memoize each row's real height once
+     rendered, so the scrollbar stays accurate. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px; }
 .msg-row.grouped { margin-bottom: 2px; }
 .msg-row.group-start { margin-top: 10px; }
 .msg-row.mine { justify-content: flex-end; }
@@ -469,6 +481,12 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.chat-item-preview .tick {
+  margin-right: 4px;
+  color: var(--text-dim);
+}
+.chat-item-preview .tick.seen { color: #53BDEB; letter-spacing: -2px; }
+
 .chat-item-badge {
   background: var(--accent);
   color: var(--accent-text);
@@ -556,7 +574,11 @@ html, body {
 .send-button:active { opacity: 0.85; }
 
 @media (prefers-reduced-motion: no-preference) {
-  .msg-row { animation: rise 0.15s ease-out; }
+  /* Only on rows arriving live while the chat is open (.animate-in is added
+     by JS). Applying it to .msg-row itself made the ENTIRE history replay the
+     animation whenever it was re-rendered — most visibly right after a page
+     refresh, where the whole list visibly flickered/jittered into place. */
+  .msg-row.animate-in { animation: rise 0.15s ease-out; }
 }
 @keyframes rise {
   from { opacity: 0; transform: translateY(4px); }

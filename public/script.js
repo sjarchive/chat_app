@@ -55,6 +55,7 @@ let pendingRestoreMessageId = null;
 let pendingRestoreScrollTop = null;
 let currentPartner = null; // the other user in the open conversation
 let chatSummaries = {}; // partnerId -> { last: message row, unread: count }
+let realtimeSubscribed = false; // realtime/profiles channels open only once per page load
 
 // ---------- Theme toggle ----------
 const SUN_ICON = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
@@ -368,8 +369,15 @@ function enterApp() {
   const savedPartner = getStoredOpenChat();
 
   loadProfiles().then(() => {
-    subscribeRealtime();
-    subscribeProfiles();
+    // Sign out and back in within the same tab re-runs enterApp; without this
+    // guard each pass would open another realtime/profiles channel with the
+    // same name, so every message event (and theme toggle repaint) would be
+    // processed — and rendered — multiple times.
+    if (!realtimeSubscribed) {
+      realtimeSubscribed = true;
+      subscribeRealtime();
+      subscribeProfiles();
+    }
     if (savedPartner) {
       chatsScreen.classList.add("hidden");
       loadChatSummaries();
@@ -537,7 +545,16 @@ function renderChatList() {
     bottom.className = "chat-item-bottom";
     const preview = document.createElement("span");
     preview.className = "chat-item-preview";
-    preview.textContent = previewText(s.last);
+    // When the last message in a conversation is mine, show its delivery
+    // tick ahead of the text — same vocabulary as in the chat itself — so the
+    // preview is readable as "I sent this" without any extra label.
+    if (s.last.sender_id === currentUser.id) {
+      const tick = document.createElement("span");
+      tick.className = "tick" + (s.last.seen_at ? " seen" : "");
+      tick.textContent = s.last.seen_at ? "✓✓" : "✓";
+      preview.appendChild(tick);
+    }
+    preview.appendChild(document.createTextNode(previewText(s.last)));
     bottom.appendChild(preview);
     if (s.unread > 0) {
       const badge = document.createElement("span");
@@ -664,9 +681,16 @@ async function loadMessages() {
 }
 
 function renderAllMessages(data) {
+  // Batch render of existing history: no per-row entry animation (see the
+  // .animate-in rule in index.html) — otherwise the whole list visibly
+  // flickers up whenever it re-renders after a refresh.
+  suppressEntryAnimation = true;
   clearMessageList();
   data.forEach(renderMessage);
+  suppressEntryAnimation = false;
 }
+
+let suppressEntryAnimation = false;
 
 function clearMessageList() {
   messageList.innerHTML = "";
@@ -1056,6 +1080,7 @@ function renderMessage(msg) {
 
   const row = document.createElement("div");
   row.className = `msg-row ${mine ? "mine" : "theirs"} group-last ${isGrouped ? "grouped" : "group-start"}`;
+  if (!suppressEntryAnimation) row.classList.add("animate-in");
   row.dataset.msgId = msg.id;
 
   const bubble = document.createElement("div");
