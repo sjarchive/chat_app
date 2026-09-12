@@ -31,10 +31,7 @@ const replyPreview = document.getElementById("reply-preview");
 const replyPreviewName = document.getElementById("reply-preview-name");
 const replyPreviewText = document.getElementById("reply-preview-text");
 const replyPreviewCancel = document.getElementById("reply-preview-cancel");
-const settingsButtons = [
-  document.getElementById("settings-button"),
-  document.getElementById("settings-button-chat"),
-];
+const settingsButtons = [document.getElementById("settings-button")];
 const settingsOverlay = document.getElementById("settings-overlay");
 const settingsName = document.getElementById("settings-name");
 const settingsError = document.getElementById("settings-error");
