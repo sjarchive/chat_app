@@ -550,12 +550,15 @@ html, body {
 .jump-bottom {
   position: absolute;
   right: 16px;
-  bottom: 12px;
+  /* Anchored to the chat screen (.screen is position:relative), floating
+     above the composer rather than inside the scrolling message content. */
+  bottom: 82px;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 8px 14px;
+  font-family: inherit;
   font-size: 14px;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0,0,0,0.3);
@@ -772,9 +775,14 @@ html, body {
       </div>
     </header>
 
-    <main id="message-list" class="message-list">
-      <div id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></div>
-    </main>
+    <main id="message-list" class="message-list"></main>
+
+    <!-- Lives OUTSIDE the scrolling message list: an absolutely positioned
+         child of a scroll container is positioned within the scrollable
+         content and scrolls away with it, so it would only ever be visible
+         at the very bottom of the history — exactly where it's not needed.
+         Pinned to the chat screen instead, floating above the composer. -->
+    <button type="button" id="jump-bottom" class="jump-bottom hidden" aria-label="Jump to latest messages">↓ <span id="jump-bottom-count"></span></button>
 
     <div id="reply-preview" class="reply-preview hidden">
       <div class="reply-preview-info">

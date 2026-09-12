@@ -809,11 +809,8 @@ let suppressEntryAnimation = false;
 
 function clearMessageList() {
   messageList.innerHTML = "";
-  // innerHTML = "" above also removes #jump-bottom, which lives inside this
-  // list. Its element references (and listeners) would then point at a
-  // detached node, so the scroll-up button would never appear again after
-  // opening a chat. Re-attach it so it keeps working.
-  messageList.appendChild(jumpBottom);
+  // #jump-bottom lives outside this list now (see index.html), so wiping
+  // the messages can't destroy it.
   lastRenderedSenderId = null;
   lastRenderedDay = null;
   lastRowElement = null;
@@ -1469,24 +1466,41 @@ function scrollToBottom() {
 // messages arrived while scrolled up — so it always offers a way back down.
 // The count badge only appears on top of that when there's something unseen.
 function updateJumpBottom() {
-  if (isNearBottom()) {
-    jumpBottom.classList.add("hidden");
-    return;
+  const shouldShow = !isNearBottom();
+  if (shouldShow !== jumpBottomVisible) {
+    jumpBottomVisible = shouldShow;
+    jumpBottom.classList.toggle("hidden", !shouldShow);
   }
-  jumpBottomCount.textContent = unseenWhileScrolledUp > 0 ? unseenWhileScrolledUp : "";
-  jumpBottom.classList.remove("hidden");
+  if (shouldShow) {
+    const count = unseenWhileScrolledUp > 0 ? unseenWhileScrolledUp : "";
+    if (jumpBottomCount.textContent != count) jumpBottomCount.textContent = count;
+  }
 }
 
+// RAF-throttled: isNearBottom() reads scrollHeight/clientHeight, a forced
+// layout pass that's expensive in a list full of content-visibility rows.
+// Running it on every scroll event is what made scrolling stutter — coalesce
+// to one check per frame, and only touch the button's DOM when its visibility
+// or count actually changed.
+let jumpBottomTick = false;
+let jumpBottomVisible = false;
+
 messageList.addEventListener("scroll", () => {
-  if (isNearBottom() && unseenWhileScrolledUp > 0) {
-    unseenWhileScrolledUp = 0;
-  }
-  updateJumpBottom();
+  if (jumpBottomTick) return;
+  jumpBottomTick = true;
+  requestAnimationFrame(() => {
+    jumpBottomTick = false;
+    if (isNearBottom() && unseenWhileScrolledUp > 0) {
+      unseenWhileScrolledUp = 0;
+    }
+    updateJumpBottom();
+  });
 });
 
 jumpBottom.addEventListener("click", () => {
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   unseenWhileScrolledUp = 0;
+  jumpBottomVisible = false;
   jumpBottom.classList.add("hidden");
 });
 
