@@ -71,6 +71,7 @@ function hideEl(el) {
 
 let currentUser = null;
 let profileCache = {}; // id -> display_name (usernames are looked up ad-hoc for search)
+let usernameCache = {}; // id -> username (sign-in handle; shown on hover of the chat header name)
 let messageCache = {}; // id -> full message row, so replies can show a quote
 let messageRowById = {}; // id -> rendered DOM row, so we can scroll to it
 let replyingTo = null; // the message object currently being replied to
@@ -96,6 +97,8 @@ function applyTheme(theme) {
   if (themeIcon) themeIcon.innerHTML = theme === "light" ? MOON_ICON : SUN_ICON;
   if (themeToggle) {
     themeToggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+    // Hover tooltip mirrors the aria-label, which flips with the current theme
+    themeToggle.title = themeToggle.getAttribute("aria-label");
   }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", theme === "light" ? "#ECE5DD" : "#0E1116");
@@ -397,7 +400,10 @@ function buildProfilesChannel() {
       "postgres_changes",
       { event: "UPDATE", schema: "public", table: "profiles" },
       (payload) => {
-        const { id, display_name } = payload.new;
+        const { id, display_name, username } = payload.new;
+        // Cache the username before the display-name early return below so a
+        // username-only change still lands (and can't be missed).
+        if (id && username) usernameCache[id] = username;
         if (!id || profileCache[id] === display_name) return;
         profileCache[id] = display_name;
 
@@ -428,7 +434,10 @@ function buildProfilesChannel() {
         }
 
         // ...and the conversation header / chats-list rows showing that name
-        if (currentPartner === id) chatPartnerName.textContent = display_name;
+        if (currentPartner === id) {
+          chatPartnerName.textContent = display_name;
+          updatePartnerNameTitle();
+        }
         if (!chatsScreen.classList.contains("hidden") || isDesktopLayout()) renderChatList();
         if (replyingTo && replyingTo.sender_id === id) {
           replyPreviewName.textContent = display_name;
@@ -465,6 +474,7 @@ async function handleProfileDeleted(id) {
 
   clearTyping(id);
   delete profileCache[id];
+  delete usernameCache[id];
   delete chatSummaries[id];
 
   if (currentPartner === id) {
@@ -557,6 +567,15 @@ function clearStoredOpenChat() {
   } catch (e) {}
 }
 
+// Hover tooltip for the chat header name: reveals the partner's username —
+// the sign-in handle used to search for them — alongside their display name.
+// Empty until the username lands in the cache (profiles load / search result /
+// ad-hoc fetch), then stays in sync wherever the header name is rewritten.
+function updatePartnerNameTitle() {
+  const username = currentPartner ? usernameCache[currentPartner] : null;
+  chatPartnerName.title = username ? `@${username}` : "";
+}
+
 // ---------- Conversation navigation ----------
 // Each opened conversation gets its own history entry, so the phone's /
 // browser's back button walks back out of a chat to the chats list instead
@@ -578,6 +597,7 @@ async function openConversation(partnerId, replace = false) {
   // for a full round trip after tapping a chat. Show "…" and fill the name
   // in when it arrives.
   chatPartnerName.textContent = profileCache[partnerId] || "…";
+  updatePartnerNameTitle();
   // Opening the chat reads everything, so its unread badge is stale from
   // here on (markConversationSeen persists this in the database).
   if (chatSummaries[partnerId]) chatSummaries[partnerId].unread = 0;
@@ -593,7 +613,10 @@ async function openConversation(partnerId, replace = false) {
   updateActiveChatItem();
   if (!profileCache[partnerId]) {
     ensureProfileCached(partnerId).then((name) => {
-      if (name && currentPartner === partnerId) chatPartnerName.textContent = name;
+      if (name && currentPartner === partnerId) {
+        chatPartnerName.textContent = name;
+        updatePartnerNameTitle();
+      }
     });
   }
   // Clear out the previous conversation's messages immediately, rather than
@@ -686,9 +709,10 @@ chatPartnerName.addEventListener("touchend", () => {
 
 // ---------- Profiles ----------
 async function loadProfiles() {
-  const { data, error } = await supabaseClient.from("profiles").select("id, display_name, public_key");
+  const { data, error } = await supabaseClient.from("profiles").select("id, display_name, username, public_key");
   if (error) return console.error(error);
   profileCache = Object.fromEntries(data.map((p) => [p.id, p.display_name]));
+  usernameCache = Object.fromEntries(data.filter((p) => p.username).map((p) => [p.id, p.username]));
   data.forEach((p) => CircleCrypto.cachePublicKey(p.id, p.public_key));
 }
 
@@ -915,6 +939,7 @@ async function runUserSearch(term) {
   } else {
     for (const p of data) {
       profileCache[p.id] = p.display_name;
+      if (p.username) usernameCache[p.id] = p.username;
       CircleCrypto.cachePublicKey(p.id, p.public_key);
       const row = document.createElement("div");
       row.className = "search-result";
@@ -1204,11 +1229,12 @@ async function ensureProfileCached(id) {
   if (profileCache[id]) return profileCache[id];
   const { data, error } = await supabaseClient
     .from("profiles")
-    .select("id, display_name, public_key")
+    .select("id, display_name, username, public_key")
     .eq("id", id)
     .single();
   if (error || !data) return null;
   profileCache[id] = data.display_name;
+  if (data.username) usernameCache[id] = data.username;
   CircleCrypto.cachePublicKey(id, data.public_key);
   return data.display_name;
 }
